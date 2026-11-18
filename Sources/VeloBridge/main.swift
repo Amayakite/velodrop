@@ -108,7 +108,7 @@ private func launch(_ bundle: URL) throws {
     let dataOverrides = ["VELODROP_DATA", "VELODROP_DESTINATION"].flatMap { key in
         environment[key].map { ["--env", "\(key)=\($0)"] } ?? []
     }
-    process.arguments = ["-g", "-a", bundle.path, "--env", "VELODROP_BACKGROUND_LAUNCH=1"] + dataOverrides
+    process.arguments = ["-a", bundle.path, "--env", "VELODROP_BACKGROUND_LAUNCH=1"] + dataOverrides
     process.standardInput = FileHandle.nullDevice
     process.standardOutput = FileHandle.nullDevice
     process.standardError = FileHandle.nullDevice

@@ -5,22 +5,17 @@ import VeloCore
 @main
 struct VeloDropApp: App {
     @NSApplicationDelegateAdaptor(AppLifecycle.self) private var lifecycle
-    private var model: DownloadModel { lifecycle.model }
 
     var body: some Scene {
-        MenuBarExtra {
-            DownloadsPanel(model: model, openPreferences: lifecycle.openPreferences, openDownloads: lifecycle.openDownloads)
-        } label: {
-            HStack(spacing: 4) {
-                Image(systemName: model.activeCount > 0 ? "arrow.down.circle.fill" : "arrow.down.circle")
-                if model.activeCount > 0 {
-                    Text(Format.rate(model.rate)).monospacedDigit()
+        Settings { EmptyView() }
+            .commands {
+                CommandGroup(replacing: .appSettings) {
+                    Button("Settings…", action: lifecycle.openPreferences).keyboardShortcut(",")
+                }
+                CommandGroup(after: .windowArrangement) {
+                    Button("Downloads", action: lifecycle.openDownloads)
                 }
             }
-            .accessibilityLabel(model.activeCount > 0
-                                ? String(localized: "VeloDrop, \(model.activeCount) active") : "VeloDrop")
-        }
-        .menuBarExtraStyle(.window)
 
     }
 }
@@ -28,7 +23,29 @@ struct VeloDropApp: App {
 @MainActor
 final class AppLifecycle: NSObject, NSApplicationDelegate, NSWindowDelegate {
     let model = DownloadModel()
+    private var statusItem: NSStatusItem?
+    private weak var foregroundWindow: NSWindow?
     private var downloadsWindow: NSWindow?
+
+    private func updateStatusItem() {
+        withObservationTracking {
+            statusItem?.button?.image = NSImage(systemSymbolName: model.activeCount > 0
+                ? "arrow.down.circle.fill" : "arrow.down.circle", accessibilityDescription: "VeloDrop")
+            statusItem?.button?.toolTip = "VeloDrop · " + Format.rate(model.rate)
+        } onChange: { [weak self] in
+            DispatchQueue.main.async { self?.updateStatusItem() }
+        }
+    }
+
+    @objc private func statusItemClicked() {
+        if let confirmationWindow { present(confirmationWindow) }
+        else { openDownloads() }
+    }
+
+    func applicationDidBecomeActive(_ notification: Notification) {
+        foregroundWindow?.makeKeyAndOrderFront(nil)
+    }
+
     private var settingsWindow: NSWindow?
     private var confirmationWindow: NSWindow?
     private var confirmingID: UUID?
@@ -42,10 +59,7 @@ final class AppLifecycle: NSObject, NSApplicationDelegate, NSWindowDelegate {
         confirmingID = model.confirmation?.id
         confirmationWindow?.orderOut(nil)
         confirmationWindow = nil
-        guard let item = model.confirmation else {
-            DispatchQueue.main.async { [weak self] in self?.model.confirmNextIfNeeded() }
-            return
-        }
+        guard let item = model.confirmation else { return }
         confirmationWindow = makeWindow(title: String(localized: "Confirm Download")) {
             DownloadConfirmationView(transfer: item, model: model)
         }
@@ -71,6 +85,12 @@ final class AppLifecycle: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        NSApp.setActivationPolicy(.regular)
+        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        statusItem = item
+        item.button?.target = self
+        item.button?.action = #selector(statusItemClicked)
+        updateStatusItem()
         let background = ProcessInfo.processInfo.environment["VELODROP_BACKGROUND_LAUNCH"] == "1"
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
@@ -81,7 +101,6 @@ final class AppLifecycle: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 if self.model.confirmation != nil { self.showConfirmation() }
                 else { self.openDownloads() }
             }
-            self.model.confirmNextIfNeeded()
             if self.model.confirmation != nil { self.showConfirmation() }
             self.model.showPendingIntake()
             if !background && self.model.confirmation == nil { self.openDownloads() }
@@ -89,7 +108,8 @@ final class AppLifecycle: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        openDownloads()
+        if let confirmationWindow { present(confirmationWindow) }
+        else { openDownloads() }
         return false
     }
 
@@ -128,15 +148,20 @@ final class AppLifecycle: NSObject, NSApplicationDelegate, NSWindowDelegate {
         window.styleMask = [.titled, .closable, .miniaturizable]
         window.isReleasedWhenClosed = false
         window.delegate = self
+        window.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]
         window.center()
         return window
     }
 
     private func present(_ window: NSWindow?) {
         guard let window else { return }
-        NSApp.activate()
+        foregroundWindow = window
         if window.isMiniaturized { window.deminiaturize(nil) }
         window.makeKeyAndOrderFront(nil)
+        window.orderFrontRegardless()
+        // Browser capture explicitly requests a foreground dialog, including repeated
+        // handoffs after Edge became active again.
+        NSApp.activate(ignoringOtherApps: true)
     }
 }
 

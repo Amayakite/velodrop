@@ -17,7 +17,7 @@ final class DownloadModel {
     var showWindowOnCapture: Bool {
         didSet { UserDefaults.standard.set(showWindowOnCapture, forKey: "showWindowOnCapture") }
     }
-    var confirmation: Transfer? {
+    private(set) var confirmation: Transfer? {
         didSet { onConfirmationChanged?() }
     }
     @ObservationIgnored var onConfirmationChanged: (() -> Void)?
@@ -111,8 +111,9 @@ final class DownloadModel {
     }
 
     func askToConfirm(_ transfer: Transfer) {
-        guard transfer.state == .awaitingConfirmation else { return }
-        confirmation = transfer
+        guard let current = transfers.first(where: { $0.id == transfer.id }),
+              current.state == .awaitingConfirmation else { return }
+        confirmation = current
         showPendingIntake()
     }
 
@@ -130,6 +131,7 @@ final class DownloadModel {
         save(item)
         confirmation = nil
         onProgress?(item.id)
+        confirmNextIfNeeded()
         startLoop()
     }
 
