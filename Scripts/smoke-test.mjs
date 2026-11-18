@@ -18,6 +18,8 @@ const env = { ...process.env, VELODROP_DATA: home, VELODROP_DESTINATION: nativeD
 const appLog = [];
 const edgeLog = [];
 const calls = [];
+let liveParallelRequests = 0;
+let peakParallelRequests = 0;
 const downloadSize = 28 * 1024 * 1024;
 const payload = Buffer.alloc(downloadSize);
 for (let i = 0; i < payload.length; i++) payload[i] = i % 251;
@@ -45,6 +47,11 @@ const fixture = createServer((request, response) => {
   const browser = !request.headers["user-agent"]?.includes("aria2");
   const match = /^bytes=(\d+)-(\d*)$/.exec(request.headers.range ?? "");
   calls.push({ route, browser, range: request.headers.range, since: Date.now() });
+  if (route === "parallel.zip" && !browser) {
+    liveParallelRequests += 1;
+    peakParallelRequests = Math.max(peakParallelRequests, liveParallelRequests);
+    response.once("close", () => { liveParallelRequests -= 1; });
+  }
   if (route === "fallback.zip" && !browser) {
     response.writeHead(403).end();
     return;
@@ -241,9 +248,10 @@ try {
     call => call.route === "parallel.zip" && !call.browser && call.range).map(call => call.range)).size >= 2);
   await waitFor("downloaded file", () => records().some(item => item.name === "parallel.zip" && item.state === "completed"));
   await waitFor("Edge cancellation after save", async () => (await browserState("parallel.zip"))?.state === "interrupted");
+  assert.ok(peakParallelRequests >= 2, "Segment requests overlap in time.");
   assert.equal(sha256(join(nativeDownloads, "parallel.zip")), digest);
   assert.equal(existsSync(join(edgeDownloads, "parallel.zip")), false);
-  console.log("Edge launched VeloDrop and handed off an ordinary file, aria2 used multiple ranges, and the final SHA-256 matched.");
+  console.log(`Edge launched VeloDrop, aria2 used ${peakParallelRequests} concurrent requests, and the final SHA-256 matched.`);
 
   await start("fallback.zip");
   await waitFor("aria2 rejection", () => calls.some(call => call.route === "fallback.zip" && !call.browser));
