@@ -7,9 +7,8 @@ const recent = new Map();
 const maxAge = 15_000;
 
 export function observeBrowserRequests() {
-  chrome.permissions.onRemoved.addListener(() => recent.clear());
   if (!chrome.webRequest) return;
-  chrome.webRequest.onSendHeaders.addListener(request => {
+  const capture = request => {
     if (request.tabId < 0) return;
     const fields = Object.fromEntries((request.requestHeaders ?? [])
       .filter(header => allowedHeaders.has(header.name.toLowerCase()) && typeof header.value === "string")
@@ -17,8 +16,25 @@ export function observeBrowserRequests() {
     recent.delete(request.requestId);
     recent.set(request.requestId, { url: request.url, method: request.method, fields, at: Date.now() });
     while (recent.size > 128) recent.delete(recent.keys().next().value);
-  }, { urls: networkPermissions.origins, types: ["main_frame", "sub_frame", "xmlhttprequest", "other"] },
-  ["requestHeaders", "extraHeaders"]);
+  };
+  let revision = 0;
+  const refresh = async () => {
+    const current = ++revision;
+    const granted = await chrome.permissions.contains(networkPermissions);
+    if (current !== revision) return;
+    const event = chrome.webRequest.onSendHeaders;
+    if (granted && !event.hasListener(capture)) {
+      event.addListener(capture,
+        { urls: networkPermissions.origins, types: ["main_frame", "sub_frame", "xmlhttprequest", "other"] },
+        ["requestHeaders", "extraHeaders"]);
+    } else if (!granted) {
+      event.removeListener(capture);
+      recent.clear();
+    }
+  };
+  chrome.permissions.onAdded.addListener(() => void refresh());
+  chrome.permissions.onRemoved.addListener(() => void refresh());
+  void refresh();
 }
 
 function takeRecent(url) {

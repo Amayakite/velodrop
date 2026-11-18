@@ -11,7 +11,12 @@ let pulse;
 let sweeping = false;
 let settings = chrome.storage.local.get(defaults);
 chrome.storage.onChanged.addListener((_changes, area) => {
-  if (area === "local") settings = chrome.storage.local.get(defaults);
+  if (area === "local") {
+    settings = chrome.storage.local.get(defaults);
+    if (["enabled", "minimumMiB", "excludedHosts"].some(key => key in _changes)) {
+      void settings.then(rules => native({ action: "ping", rules })).catch(() => {});
+    }
+  }
 });
 
 function native(message, timeout = 2400) {
@@ -153,6 +158,7 @@ async function takeOver(item) {
     port?.disconnect();
     if (handoff) schedule();
   }
+  return canceled;
 }
 
 async function settleFast(job, item, state, returned) {
@@ -266,7 +272,10 @@ async function sweep() {
 chrome.downloads.onDeterminingFilename.addListener((item, suggest) => {
   if (item.byExtensionId === chrome.runtime.id || starting.has(item.id)) return false;
   starting.add(item.id);
-  void takeOver(item).finally(() => {
+  void takeOver(item).then(canceled => {
+    starting.delete(item.id);
+    if (!canceled) suggest();
+  }, () => {
     starting.delete(item.id);
     suggest();
   });
@@ -283,6 +292,6 @@ chrome.runtime.onStartup.addListener(() => void sweep());
 chrome.runtime.onInstalled.addListener(() => void sweep());
 chrome.runtime.onMessage.addListener((message, _, reply) => {
   if (message.action !== "ping") return false;
-  native({ action: "ping" }).then(reply, () => reply({ ok: false }));
+  settings.then(rules => native({ action: "ping", rules })).then(reply, () => reply({ ok: false }));
   return true;
 });

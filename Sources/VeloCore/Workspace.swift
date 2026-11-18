@@ -7,7 +7,8 @@ public struct Workspace: Sendable {
         public let updatedAt: Int64
 
         init(_ transfer: Transfer) {
-            state = transfer.state
+            // Older extensions interpret failed as a request to resume Edge.
+            state = transfer.state == .handedToBrowser ? .failed : transfer.state
             updatedAt = Int64(transfer.updatedAt.timeIntervalSince1970 * 1000)
         }
     }
@@ -149,9 +150,7 @@ public struct Workspace: Sendable {
     public func recoveredOutput(_ transfer: Transfer) -> URL? {
         let id = transfer.id
         let stage = stage(id)
-        let payload = stage.appendingPathComponent("payload")
-        guard !FileManager.default.fileExists(atPath: payload.path),
-              let name = try? String(contentsOf: stage.appendingPathComponent("publication"), encoding: .utf8),
+        guard let name = try? String(contentsOf: stage.appendingPathComponent("publication"), encoding: .utf8),
               name == (name as NSString).lastPathComponent else { return nil }
         let file = directory(for: transfer).appendingPathComponent(name)
         return ownsPublishedFile(file, id: id) ? file : nil
@@ -187,6 +186,16 @@ public struct Workspace: Sendable {
 
         let destination = directory(for: transfer)
         try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
+        let original = destination.appendingPathComponent(transfer.name)
+        if transfer.existingFilePolicy == .skip && FileManager.default.fileExists(atPath: original.path) {
+            throw TransferError.fileExists
+        }
+        if transfer.existingFilePolicy == .replace && FileManager.default.fileExists(atPath: original.path) {
+            let receipt = stage(transfer.id).appendingPathComponent("publication")
+            try Data(transfer.name.utf8).write(to: receipt, options: .atomic)
+            _ = try FileManager.default.replaceItemAt(original, withItemAt: source, options: .usingNewMetadataOnly)
+            return original
+        }
         let stem = (transfer.name as NSString).deletingPathExtension
         let ext = (transfer.name as NSString).pathExtension
         let suffix = ext.isEmpty ? "" : ".\(ext)"
@@ -200,6 +209,8 @@ public struct Workspace: Sendable {
                 return target
             } catch let error as NSError where error.domain == NSCocoaErrorDomain
                 && error.code == NSFileWriteFileExistsError {
+                if transfer.existingFilePolicy == .skip { throw TransferError.fileExists }
+                // A concurrently created file receives its own name rather than being overwritten.
                 continue
             }
         }

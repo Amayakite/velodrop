@@ -14,6 +14,7 @@ private struct Request: Codable {
     var mimeType: String?
     var headers: [String: String]?
     var proxy: BrowserProxy?
+    var rules: BrowserRules?
 }
 
 private struct Reply: Encodable {
@@ -29,6 +30,12 @@ private func handle(_ data: Data, bundle: URL) throws -> Reply {
 
     switch request.action {
     case "ping":
+        if let rules = request.rules, rules.minimumMiB.isFinite, rules.minimumMiB >= 0,
+           rules.excludedHosts.utf8.count <= 32768 {
+            try JSONEncoder().encode(rules).write(to: workspace.root.appendingPathComponent("browser-rules.json"), options: .atomic)
+        }
+        try Data(String(Date().timeIntervalSince1970).utf8)
+            .write(to: workspace.root.appendingPathComponent("browser-connection"), options: .atomic)
         let engine = BundleLayout.engine(in: bundle)
         return Reply(ok: FileManager.default.isExecutableFile(atPath: engine.path))
 

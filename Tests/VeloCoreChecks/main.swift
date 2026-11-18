@@ -89,6 +89,44 @@ func checkBrowserHistoryAndRequestPrivacy() throws {
     check(workspace.browserStatus(transfer.id) == nil)
 }
 
+func checkCollisionPoliciesAndBrowserOutcomes() throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let workspace = Workspace(root: root.appendingPathComponent("state"), destination: root.appendingPathComponent("files"))
+    try workspace.prepare()
+    try FileManager.default.createDirectory(at: workspace.destination, withIntermediateDirectories: true)
+    let target = workspace.destination.appendingPathComponent("report.pdf")
+    try Data("original".utf8).write(to: target)
+    var item = try Transfer(url: URL(string: "https://example.com/report.pdf")!, name: "report.pdf", fromBrowser: true)
+    try FileManager.default.createDirectory(at: workspace.stage(item.id), withIntermediateDirectories: true)
+    try Data("replacement".utf8).write(to: workspace.stage(item.id).appendingPathComponent("payload"))
+    item.existingFilePolicy = .skip
+    checkThrows { _ = try workspace.publish(item) }
+    check(try Data(contentsOf: target) == Data("original".utf8))
+    item.existingFilePolicy = .replace
+    check(try workspace.publish(item) == target)
+    check(try Data(contentsOf: target) == Data("replacement".utf8))
+    check(workspace.ownsPublishedFile(target, id: item.id))
+    check(workspace.recoveredOutput(item) == target)
+    check(try workspace.publish(item) == target)
+    item.state = .handedToBrowser
+    try workspace.update(item)
+    check(workspace.read(item.id)?.state == .handedToBrowser)
+    check(workspace.browserStatus(item.id)?.state == .failed)
+    try workspace.removeHistory(item)
+    check(workspace.browserStatus(item.id)?.state == .failed)
+    var canceled = try Transfer(url: URL(string: "https://example.com/cancel")!, name: "cancel", fromBrowser: true)
+    canceled.state = .canceled
+    try workspace.update(canceled)
+    check(workspace.browserStatus(canceled.id)?.state == .canceled)
+    // Optional additions must preserve records written before the redesign.
+    let encoded = try JSONEncoder().encode(canceled)
+    var old = try JSONSerialization.jsonObject(with: encoded) as! [String: Any]
+    for key in ["existingFilePolicy", "priority", "speedLimit"] { old.removeValue(forKey: key) }
+    check(try JSONDecoder().decode(Transfer.self, from: JSONSerialization.data(withJSONObject: old)).id == canceled.id)
+}
+
+try checkCollisionPoliciesAndBrowserOutcomes()
 try checkBrowserInputCannotSetDestinationOrCredentials()
 try checkHandoffAndPublishKeepExistingFileAndQuarantine()
 try checkBrowserHistoryAndRequestPrivacy()

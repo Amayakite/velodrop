@@ -9,11 +9,16 @@ struct DownloadConfirmationView: View {
     @State private var choosingFolder = false
     @State private var connections: Int
     @State private var folderError: String?
+    @State private var filename: String
+    @State private var later = false
+    @State private var filePolicy: ExistingFilePolicy
 
     init(transfer: Transfer, model: DownloadModel) {
         self.transfer = transfer
         self.model = model
-        _directory = State(initialValue: model.workspace.directory(for: transfer))
+        _filePolicy = State(initialValue: model.existingFilePolicy)
+        _filename = State(initialValue: transfer.name)
+        _directory = State(initialValue: URL(fileURLWithPath: transfer.destinationPath ?? model.defaultFolder))
         _connections = State(initialValue: transfer.connectionLimit ?? model.maxConnections)
     }
 
@@ -21,7 +26,7 @@ struct DownloadConfirmationView: View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Confirm Download").font(.title2.weight(.semibold))
             VStack(alignment: .leading, spacing: 5) {
-                Text(transfer.displayName).font(.headline).lineLimit(2)
+                TextField("Filename", text: $filename).textFieldStyle(.roundedBorder)
                 Text(description).font(.subheadline).foregroundStyle(.secondary)
             }
             Divider()
@@ -32,6 +37,11 @@ struct DownloadConfirmationView: View {
                         .lineLimit(1).truncationMode(.head)
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
+                    Menu("Recent Folders") {
+                        ForEach(model.recentFolders, id: \.self) { path in
+                            Button(path) { directory = URL(fileURLWithPath: path) }
+                        }
+                    }.disabled(model.recentFolders.isEmpty)
                     Button("Choose Folder…") { choosingFolder = true }
                 }
                 if let folderError {
@@ -41,13 +51,25 @@ struct DownloadConfirmationView: View {
             Picker("Connections per file", selection: $connections) {
                 ForEach(1...16, id: \.self) { Text("\($0)").tag($0) }
             }
+            ExistingFilePicker(selection: $filePolicy)
+            if filePolicy == .replace {
+                Text("An existing file with the same name will be replaced.").font(.caption).foregroundStyle(.orange)
+            }
+            Toggle("Download later", isOn: $later)
+            if model.transfers.filter({ $0.state == .awaitingConfirmation }).count > 1 {
+                Text("Other downloads are waiting for confirmation.").font(.caption).foregroundStyle(.secondary)
+            }
             HStack {
-                Spacer()
-                Button("Cancel and Continue in Edge", role: .cancel) { model.useEdge(transfer) }
+                Button("Cancel download", role: .cancel) { model.cancel(transfer) }
                     .keyboardShortcut(.cancelAction)
-                Button("Start Download") { model.confirm(transfer, into: directory, connections: connections) }
+                Spacer()
+                Button("Use Edge") { model.useEdge(transfer) }
+                Button("Use VeloDrop") {
+                    model.confirm(transfer, into: directory, connections: connections, name: filename, later: later, filePolicy: filePolicy)
+                }
                     .keyboardShortcut(.defaultAction)
                     .buttonStyle(.borderedProminent)
+                    .disabled(filename.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
         .padding(22)
@@ -160,13 +182,38 @@ struct DownloadProgressView: View {
             if let item = transfer {
                 Text(item.displayName).font(.title3.weight(.semibold)).textSelection(.enabled)
                 Text(LocalizedStringKey(status(item))).foregroundStyle(.secondary)
-                ProgressView(value: item.fraction ?? 0)
+                if item.state == .completed, let path = item.finalPath, !FileManager.default.fileExists(atPath: path) {
+                    Label("File moved or deleted", systemImage: "exclamationmark.triangle").foregroundStyle(.orange)
+                }
+                HStack {
+                    ProgressView(value: item.fraction ?? 0)
+                    if let fraction = item.fraction {
+                        Text(fraction, format: .percent.precision(.fractionLength(0))).monospacedDigit()
+                    }
+                }
                 HStack {
                     Text("\(Format.bytes(item.received)) / \(item.total > 0 ? Format.bytes(item.total) : "—")")
                     Spacer()
                     Text(Format.rate(item.speed)).monospacedDigit()
                 }
-                LabeledContent("Active Connections", value: String(item.connections))
+                LabeledContent("Remaining", value: item.remainingText)
+                LabeledContent("Active Connections", value: "\(item.connections) / \(item.connectionLimit ?? model.maxConnections)")
+                Picker("Speed Limit", selection: Binding(
+                    get: { item.speedLimit ?? 0 },
+                    set: { model.setSpeed(id, bytesPerSecond: $0) }
+                )) {
+                    Text("Unlimited").tag(Int64(0))
+                    Text("1 MB/s").tag(Int64(1_000_000))
+                    Text("5 MB/s").tag(Int64(5_000_000))
+                    Text("10 MB/s").tag(Int64(10_000_000))
+                }.disabled(item.state.terminal)
+                Picker("Priority", selection: Binding(
+                    get: { item.priority ?? 0 },
+                    set: { model.setPriority(id, priority: $0) }
+                )) {
+                    Text("Normal").tag(0)
+                    Text("High").tag(1)
+                }.disabled(item.state.terminal)
                 Picker("Connections per file", selection: Binding(
                     get: { item.connectionLimit ?? model.maxConnections },
                     set: { model.setConnections(id, count: $0) }
@@ -213,6 +260,18 @@ struct DownloadProgressView: View {
         case .completed: return "Completed"
         case .failed: return "Download failed"
         case .canceled: return "Canceled"
+        case .handedToBrowser: return "Sent back to Edge."
+        }
+    }
+}
+
+struct ExistingFilePicker: View {
+    @Binding var selection: ExistingFilePolicy
+    var body: some View {
+        Picker("If a file already exists", selection: $selection) {
+            Text("Keep both files").tag(ExistingFilePolicy.rename)
+            Text("Skip download").tag(ExistingFilePolicy.skip)
+            Text("Replace existing file").tag(ExistingFilePolicy.replace)
         }
     }
 }

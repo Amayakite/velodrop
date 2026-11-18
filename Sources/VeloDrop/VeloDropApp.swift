@@ -46,6 +46,7 @@ final class AppLifecycle: NSObject, NSApplicationDelegate, NSWindowDelegate {
         foregroundWindow?.makeKeyAndOrderFront(nil)
     }
 
+    private var welcomeWindow: NSWindow?
     private var settingsWindow: NSWindow?
     private var confirmationWindow: NSWindow?
     private var confirmingID: UUID?
@@ -77,7 +78,7 @@ final class AppLifecycle: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     func windowShouldClose(_ sender: NSWindow) -> Bool {
         if sender === confirmationWindow, let item = model.confirmation {
-            model.useEdge(item)
+            model.cancel(item)
             return false
         }
         return true
@@ -85,6 +86,14 @@ final class AppLifecycle: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        if model.duplicateInstance {
+            let identifier = Bundle.main.bundleIdentifier ?? BundleLayout.identifier
+            NSRunningApplication.runningApplications(withBundleIdentifier: identifier)
+                .first { $0.processIdentifier != ProcessInfo.processInfo.processIdentifier }?
+                .activate(options: [.activateAllWindows])
+            NSApp.terminate(nil)
+            return
+        }
         NSApp.setActivationPolicy(.regular)
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         statusItem = item
@@ -103,7 +112,10 @@ final class AppLifecycle: NSObject, NSApplicationDelegate, NSWindowDelegate {
             }
             if self.model.confirmation != nil { self.showConfirmation() }
             self.model.showPendingIntake()
-            if !background && self.model.confirmation == nil { self.openDownloads() }
+            if !background && self.model.confirmation == nil {
+                self.openDownloads()
+                if !UserDefaults.standard.bool(forKey: "welcomeCompleted") { self.openWelcome() }
+            }
         }
     }
 
@@ -120,13 +132,27 @@ final class AppLifecycle: NSObject, NSApplicationDelegate, NSWindowDelegate {
         progressWindows = progressWindows.filter { $0.value !== window }
         if window === downloadsWindow { downloadsWindow = nil }
         if window === settingsWindow { settingsWindow = nil }
+        if window === welcomeWindow { welcomeWindow = nil }
+    }
+
+    func openWelcome() {
+        if welcomeWindow == nil {
+            welcomeWindow = makeWindow(title: "VeloDrop") {
+                WelcomeView(model: model, openPreferences: openPreferences) { [weak self] in
+                    UserDefaults.standard.set(true, forKey: "welcomeCompleted")
+                    self?.welcomeWindow?.close()
+                    self?.openDownloads()
+                }
+            }
+        }
+        present(welcomeWindow)
     }
 
     func openPreferences() {
         if settingsWindow == nil {
             settingsWindow = makeWindow(title: String(localized: "VeloDrop Settings")) {
                 PreferencesView(model: model)
-                    .frame(width: 480, height: 430)
+                    .frame(width: 580, height: 510)
             }
         }
         present(settingsWindow)
@@ -136,8 +162,10 @@ final class AppLifecycle: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if downloadsWindow == nil {
             downloadsWindow = makeWindow(title: "VeloDrop") {
                 DownloadsPanel(model: model, inWindow: true, openPreferences: openPreferences, openDownloads: openDownloads)
-                    .frame(height: 480)
+                    .frame(minWidth: 760, minHeight: 480)
             }
+            downloadsWindow?.styleMask.insert(.resizable)
+            downloadsWindow?.setContentSize(NSSize(width: 1000, height: 620))
         }
         present(downloadsWindow)
     }

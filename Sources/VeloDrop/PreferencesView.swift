@@ -1,6 +1,7 @@
 import AppKit
 import CryptoKit
 import SwiftUI
+import UniformTypeIdentifiers
 import VeloCore
 
 private struct EdgeRegistration {
@@ -47,51 +48,121 @@ struct PreferencesView: View {
     @Bindable var model: DownloadModel
     @State private var message: String?
     @State private var error = false
+    @State private var section = "General"
+    @State private var choosingFolder = false
+    @State private var checkedAt: Date?
+    @State private var rules: BrowserRules?
+    @AppStorage("deleteFilesByDefault") private var deleteFiles = true
+    @AppStorage("playCompletionSound") private var playSound = false
 
     private var extensionFolder: URL {
         BundleLayout.browserExtension(in: Bundle.main.bundleURL)
     }
 
     var body: some View {
-        Form {
-            Section("Downloads") {
-                Picker("Connections per file", selection: $model.maxConnections) {
-                    ForEach([1, 4, 8, 16], id: \.self) { Text("\($0)").tag($0) }
-                }
-                LabeledContent("Save files to", value: model.workspace.destination.path(percentEncoded: false))
-                    .lineLimit(1).truncationMode(.head)
-            }
-
-            Section("Microsoft Edge") {
-                Toggle("Show window after takeover", isOn: $model.showWindowOnCapture)
-                Toggle("Confirm browser downloads", isOn: $model.confirmBrowserDownloads)
-                Text("Set Up Edge opens the extensions page and copies the extension folder path.")
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                Text("Turn on Developer mode in Edge and choose Load unpacked. In the folder picker, press ⇧⌘G, paste the path, press Return, then choose Select Folder.")
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                HStack {
-                    Button("Set Up Edge…", action: install)
-                    Button("Copy Extension Path", action: copyPath)
-                    Button("Show in Finder") {
-                        NSWorkspace.shared.activateFileViewerSelecting([extensionFolder])
+        VStack(spacing: 0) {
+            Picker("Settings", selection: $section) {
+                Text("General").tag("General")
+                Text("Downloads").tag("Downloads")
+                Text("Microsoft Edge").tag("Edge")
+                Text("Network").tag("Network")
+            }.pickerStyle(.segmented).padding(18)
+            Form {
+                if section == "General" {
+                    LabeledContent("Version", value: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—")
+                    Section("Save files to") {
+                        Text(model.defaultFolder).textSelection(.enabled)
+                        Button("Choose Folder…") { choosingFolder = true }
+                    }
+                    Section("After Download") {
+                        Toggle("Play a sound when downloads finish", isOn: $playSound)
+                        Toggle("Show window after takeover", isOn: $model.showWindowOnCapture)
+                    }
+                    Section("Delete") {
+                        Toggle("Select file deletion by default", isOn: $deleteFiles)
+                        Text("Files will be moved to Trash. Active downloads will be stopped.")
+                            .foregroundStyle(.secondary)
                     }
                 }
-                HStack {
-                    Button("Open Edge Download Settings") { openEdge("edge://settings/downloads") }
-                    Spacer()
-                    Button("Disconnect", action: disconnect)
+                if section == "Downloads" {
+                    Section("Downloads") {
+                        Stepper("Simultaneous downloads: \(model.simultaneousDownloads)", value: $model.simultaneousDownloads, in: 1...10)
+                        Picker("Connections per file", selection: $model.maxConnections) {
+                            ForEach(1...16, id: \.self) { Text("\($0)").tag($0) }
+                        }
+                        ExistingFilePicker(selection: $model.existingFilePolicy)
+                        Toggle("Confirm browser downloads", isOn: $model.confirmBrowserDownloads)
+                        Text("Choose VeloDrop, Edge, or cancel in the download confirmation window.")
+                            .foregroundStyle(.secondary)
+                    }
                 }
-                if let message {
-                    Label(message, systemImage: error ? "exclamationmark.circle" : "checkmark.circle")
-                        .foregroundStyle(error ? .orange : .secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+                if section == "Network" {
+                    Section("Speed Limit") {
+                        Picker("Total download speed", selection: $model.bandwidthLimit) {
+                            Text("Unlimited").tag(Int64(0))
+                            Text("1 MB/s").tag(Int64(1_000_000))
+                            Text("5 MB/s").tag(Int64(5_000_000))
+                            Text("10 MB/s").tag(Int64(10_000_000))
+                        }
+                        Text("Per-download limits and connections can be changed in Download Progress.")
+                            .foregroundStyle(.secondary)
+                    }
+                    Section("Proxy") {
+                        Text("Browser downloads use the captured browser route. Other downloads use the macOS system proxy.")
+                            .foregroundStyle(.secondary)
+                    }
                 }
-            }
+                if section == "Edge" {
+                    Section("Connect Microsoft Edge") {
+                        Text("Set Up Edge opens the extensions page and copies the extension folder path.")
+                        Button("Set Up Edge…", action: install)
+                        Text("Turn on Developer mode in Edge and choose Load unpacked. In the folder picker, press ⇧⌘G, paste the path, press Return, then choose Select Folder.")
+                            .foregroundStyle(.secondary)
+                        HStack {
+                            Button("Copy Extension Path", action: copyPath)
+                            Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([extensionFolder]) }
+                        }
+                    }
+                    Section("Check Connection") {
+                        if let checkedAt {
+                            Text("Last connected \(checkedAt.formatted(date: .abbreviated, time: .standard))")
+                                .foregroundStyle(.secondary)
+                        } else {
+                            Text("No connection check received yet.").foregroundStyle(.secondary)
+                        }
+                        Button("Refresh Connection", action: refreshConnection)
+                        Text("Open the VeloDrop extension in Edge to check its connection and set excluded websites and minimum file size.")
+                            .foregroundStyle(.secondary)
+                        Button("Open Extensions") { openEdge("edge://extensions/") }
+                        Button("Disconnect", action: disconnect)
+                    }
+                    if let rules {
+                        Section("Browser Rules") {
+                            LabeledContent("Take over downloads", value: rules.enabled ? String(localized: "Enabled") : String(localized: "Disabled"))
+                            LabeledContent("Minimum file size", value: "\(rules.minimumMiB.formatted()) MiB")
+                            LabeledContent("Excluded websites", value: rules.excludedHosts.isEmpty ? String(localized: "None") : rules.excludedHosts)
+                            Text("Change these rules in the VeloDrop extension, then refresh here.").foregroundStyle(.secondary)
+                        }
+                    }
+                    if let message {
+                        Label(message, systemImage: error ? "exclamationmark.circle" : "checkmark.circle")
+                            .foregroundStyle(error ? .orange : .secondary)
+                    }
+                }
+            }.formStyle(.grouped)
         }
-        .formStyle(.grouped)
-        .navigationTitle("VeloDrop Settings")
+        .onAppear(perform: refreshConnection)
+        .fileImporter(isPresented: $choosingFolder, allowedContentTypes: [.folder]) { result in
+            do { model.defaultFolder = try result.get().path }
+            catch { model.notice = error.localizedDescription }
+        }
+    }
+
+    private func refreshConnection() {
+        checkedAt = model.lastBrowserConnection
+        if let data = try? Data(contentsOf: model.workspace.root.appendingPathComponent("browser-rules.json")) {
+            rules = try? JSONDecoder().decode(BrowserRules.self, from: data)
+        }
     }
 
     private func install() {

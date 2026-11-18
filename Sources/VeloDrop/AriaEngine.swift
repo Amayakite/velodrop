@@ -37,6 +37,8 @@ final class AriaEngine {
     private var secret = ""
     private(set) var attached = Set<UUID>()
     private var limits: [UUID: Int] = [:]
+    private var speeds: [UUID: Int64] = [:]
+    private var globalConfiguration = ""
 
     init(executable: URL, workingDirectory: URL) {
         self.executable = executable
@@ -55,6 +57,8 @@ final class AriaEngine {
         if process?.isRunning == true { return }
         attached.removeAll()
         limits.removeAll()
+        speeds.removeAll()
+        globalConfiguration = ""
         guard FileManager.default.isExecutableFile(atPath: executable.path) else {
             throw TransferError.engineUnavailable
         }
@@ -91,6 +95,8 @@ final class AriaEngine {
         endpoint = nil
         attached.removeAll()
         limits.removeAll()
+        speeds.removeAll()
+        globalConfiguration = ""
     }
 
     func add(_ transfer: Transfer, stage: URL, connections: Int, headers: BrowserHeaders?) async throws {
@@ -103,6 +109,7 @@ final class AriaEngine {
             let address = proxy.endpoint?.absoluteString ?? ""
             var options: [String: Any] = [
                 "gid": gid(transfer.id), "dir": stage.path, "out": "payload",
+                "max-download-limit": String(transfer.speedLimit ?? 0),
                 "split": String(connections), "max-connection-per-server": String(connections),
                 "min-split-size": "4M", "file-allocation": "none",
                 "continue": "true", "always-resume": "true", "stream-piece-selector": "inorder",
@@ -131,6 +138,27 @@ final class AriaEngine {
         if resume {
             let _: String = try await call("aria2.unpause", [gid(id)])
         }
+    }
+
+    func configureGlobal(concurrent: Int, speed: Int64) async throws {
+        let configuration = "\(concurrent)-\(speed)"
+        guard configuration != globalConfiguration else { return }
+        let _: String = try await call("aria2.changeGlobalOption", [[
+            "max-concurrent-downloads": String(concurrent),
+            "max-overall-download-limit": String(speed)
+        ]])
+        globalConfiguration = configuration
+    }
+
+    func setSpeed(_ id: UUID, bytesPerSecond: Int64) async throws {
+        guard attached.contains(id), speeds[id] != bytesPerSecond else { return }
+        let _: String = try await call("aria2.changeOption", [gid(id), ["max-download-limit": String(bytesPerSecond)]])
+        speeds[id] = bytesPerSecond
+    }
+
+    func prioritize(_ id: UUID, first: Bool) async throws {
+        guard attached.contains(id) else { return }
+        let _: Int = try await call("aria2.changePosition", [gid(id), first ? 0 : 10000, "POS_SET"])
     }
 
     func statuses(_ ids: [UUID]) async throws -> [UUID: EngineStatus] {

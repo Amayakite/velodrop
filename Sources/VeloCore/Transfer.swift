@@ -1,16 +1,20 @@
 import Foundation
 
 public enum TransferState: String, Codable, Sendable {
-    case awaitingConfirmation, queued, downloading, paused, completed, failed, canceled
+    case awaitingConfirmation, queued, downloading, paused, completed, failed, canceled, handedToBrowser
 
-    public var terminal: Bool { self == .completed || self == .failed || self == .canceled }
+    public var terminal: Bool { self == .completed || self == .failed || self == .canceled || self == .handedToBrowser }
     public var running: Bool { self == .queued || self == .downloading }
+}
+
+public enum ExistingFilePolicy: String, Codable, CaseIterable, Sendable {
+    case rename, skip, replace
 }
 
 public struct Transfer: Codable, Identifiable, Equatable, Sendable {
     public let id: UUID
     public var url: URL?
-    public let name: String
+    public var name: String
     public let fromBrowser: Bool
     public let expectedBytes: Int64?
     public let createdAt: Date
@@ -31,6 +35,9 @@ public struct Transfer: Codable, Identifiable, Equatable, Sendable {
     public var browserProxy: BrowserProxy?
     public var effectiveProxy: BrowserProxy?
     public var destinationPath: String?
+    public var existingFilePolicy: ExistingFilePolicy?
+    public var priority: Int?
+    public var speedLimit: Int64?
     public var finishedAt: Date?
 
     public var displayName: String {
@@ -90,11 +97,12 @@ public struct Transfer: Codable, Identifiable, Equatable, Sendable {
 }
 
 public enum TransferError: LocalizedError {
-    case invalidURL, engineUnavailable, invalidResponse, missingFile, unexpectedSize, busy
+    case fileExists, invalidURL, engineUnavailable, invalidResponse, missingFile, unexpectedSize, busy
     case engine(String)
 
     public var errorDescription: String? {
         switch self {
+        case .fileExists: return String(localized: "A file with this name already exists. Download skipped.")
         case .invalidURL: return String(localized: "Enter a valid HTTP or HTTPS link.")
         case .engineUnavailable: return String(localized: "The download engine could not start.")
         case .invalidResponse: return String(localized: "The download engine returned an invalid response.")

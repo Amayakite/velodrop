@@ -3,386 +3,345 @@ import SwiftUI
 import UniformTypeIdentifiers
 import VeloCore
 
-private let accent = Color(red: 0.21, green: 0.39, blue: 0.93)
-
 struct DownloadsPanel: View {
     @Bindable var model: DownloadModel
-    var inWindow = false
+    var inWindow = true
     let openPreferences: () -> Void
     let openDownloads: () -> Void
     @State private var search = ""
-    @State private var confirmClear = false
     @State private var selected = Set<UUID>()
-    @State private var deleting = Set<UUID>()
-    @State private var showDelete = false
+    @State private var deletion: DownloadDeletion?
     @State private var showLink = false
-    @State private var link = ""
-    @State private var formError: String?
-    @State private var scope: Scope = .all
-    @FocusState private var linkFocused: Bool
-
-    private enum Scope: String, CaseIterable { case all = "All", current = "In progress", history = "Finished" }
+    @State private var scope: DownloadScope = .all
+    @State private var fileKind = "All Types"
+    @State private var sidebar = true
+    @State private var inspector = false
+    @State private var sortOrder = [KeyPathComparator(\Transfer.createdAt, order: .reverse)]
 
     private var visible: [Transfer] {
-        model.transfers.filter { item in
-            if scope == .current && item.state.terminal { return false }
-            if scope == .history && !item.state.terminal { return false }
-            return search.isEmpty || item.displayName.localizedStandardContains(search)
-                || item.sourceURL?.host?.localizedStandardContains(search) == true
-        }
+        model.transfers.filter { scope.includes($0) && matchesType($0) && (search.isEmpty ||
+            $0.displayName.localizedStandardContains(search) ||
+            $0.sourceURL?.host?.localizedStandardContains(search) == true)
+        }.sorted(using: sortOrder)
     }
+    private var selection: [Transfer] { model.transfers.filter { selected.contains($0.id) } }
 
     var body: some View {
         VStack(spacing: 0) {
-            header
-            if showLink { linkForm }
-            if let notice = model.notice {
-                Label(notice, systemImage: "exclamationmark.circle")
-                    .font(.caption)
-                    .foregroundStyle(.orange)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 8)
-            }
-            if !model.transfers.isEmpty {
-                if inWindow {
-                    TextField("Search Downloads", text: $search)
-                        .textFieldStyle(.roundedBorder)
-                        .padding(.horizontal, 16)
-                        .padding(.bottom, 8)
-                }
-                Picker("Downloads", selection: $scope) {
-                    ForEach(Scope.allCases, id: \.self) { Text(LocalizedStringKey($0.rawValue)).tag($0) }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .padding(.horizontal, 16)
-                .padding(.bottom, 10)
-            }
-            if visible.isEmpty { empty }
-            else {
-                ScrollView {
-                    LazyVStack(spacing: 7) {
-                        ForEach(visible) { transfer in
-                            HStack {
-                                if inWindow {
-                                    Toggle("Select download", isOn: Binding(
-                                        get: { selected.contains(transfer.id) },
-                                        set: { if $0 { selected.insert(transfer.id) } else { selected.remove(transfer.id) } }
-                                    )).labelsHidden().toggleStyle(.checkbox)
-                                }
-                                TransferRow(transfer: transfer, model: model,
-                                            showDetails: { model.onProgress?(transfer.id) },
-                                            confirmDownload: { model.askToConfirm(transfer) },
-                                            deleteDownload: {
-                                                deleting = [transfer.id]
-                                                showDelete = true
-                                            })
-                            }
-                        }
-                    }
-                    .padding(.horizontal, 12)
-                    .padding(.bottom, 12)
-                }
-                .frame(height: inWindow ? nil : min(CGFloat(visible.count) * 73 + 10, 324))
-                .accessibilityLabel("Download list")
-            }
-            if inWindow && !visible.isEmpty {
-                HStack {
-                    Button("Select All") { selected = Set(visible.map(\.id)) }
-                    Button("Deselect All") { selected.removeAll() }
-                    Spacer()
-                    Button("Delete Selected…", systemImage: "trash") {
-                        deleting = selected
-                        showDelete = true
-                    }.tint(.red).disabled(selected.isEmpty)
-                }.padding(12)
-            }
+            toolbar
             Divider()
-            footer
-        }
-        .frame(width: inWindow ? 538 : 400)
-        .tint(accent)
-        .alert("Delete Downloads?", isPresented: $showDelete) {
-            Button("Delete Files and History", role: .destructive) {
-                let ids = deleting
-                selected.subtract(ids)
-                Task { await model.delete(ids, files: true) }
-            }
-            Button("Delete History Only") {
-                let ids = deleting
-                selected.subtract(ids)
-                Task { await model.delete(ids, files: false) }
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("Files will be moved to Trash. Active downloads will be stopped.")
-        }
-        .alert("Clear Finished History?", isPresented: $confirmClear) {
-            Button("Clear History", role: .destructive) {
-                for transfer in model.transfers where transfer.state.terminal {
-                    model.removeHistory(transfer)
-                }
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("Downloaded files will stay on disk.")
-        }
-    }
-
-    private var header: some View {
-        HStack(spacing: 11) {
-            Image(systemName: "arrow.down.to.line.compact")
-                .font(.system(size: 17, weight: .semibold))
-                .foregroundStyle(.white)
-                .frame(width: 36, height: 36)
-                .background(
-                    LinearGradient(colors: [Color(red: 0.31, green: 0.58, blue: 1), accent],
-                                   startPoint: .topLeading, endPoint: .bottomTrailing),
-                    in: RoundedRectangle(cornerRadius: 11)
-                )
-                .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 3) {
-                Text("Downloads").font(.system(size: 16, weight: .semibold))
-                if model.activeCount > 0 {
-                    Text("\(model.activeCount) active · \(Format.rate(model.rate))")
-                        .font(.caption).monospacedDigit().foregroundStyle(.secondary)
-                } else {
-                    Text("VeloDrop").font(.caption).foregroundStyle(.secondary)
-                }
-            }
-            Spacer(minLength: 4)
-            Button {
-                showLink.toggle()
-                if showLink {
-                    linkFocused = true
-                    formError = nil
-                }
-            } label: {
-                Image(systemName: showLink ? "xmark" : "plus").frame(width: 16, height: 17)
-            }
-            .help(showLink ? "Close link entry" : "Add download link")
-            .accessibilityLabel(showLink ? "Close link entry" : "Add download link")
-        }
-        .padding(16)
-    }
-
-    private var linkForm: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            HStack(spacing: 7) {
-                TextField("https://example.com/file.zip", text: $link)
-                    .textFieldStyle(.roundedBorder)
-                    .focused($linkFocused)
-                    .onSubmit(addLink)
-                    .accessibilityLabel("Download URL")
-                Button("Add", action: addLink)
-                    .buttonStyle(.borderedProminent)
-                    .disabled(link.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            }
-            if let formError {
-                Text(formError).font(.caption).foregroundStyle(.red)
-            }
-        }
-        .padding(.horizontal, 16)
-        .padding(.bottom, 12)
-    }
-
-    private var empty: some View {
-        VStack(spacing: 8) {
-            Image(systemName: "tray")
-                .font(.system(size: 24, weight: .light))
-                .foregroundStyle(.secondary)
-                .symbolRenderingMode(.hierarchical)
-            Text(emptyTitle)
-                .font(.subheadline.weight(.medium))
-            if model.transfers.isEmpty {
-                Text("Add a link or download a file from Edge.")
-                    .font(.caption).foregroundStyle(.secondary)
-                if inWindow {
-                    Button("Edge Settings…", action: openPreferences)
-                        .padding(.top, 5)
-                }
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: inWindow ? .infinity : nil)
-        .padding(.vertical, 20)
-        .padding(.bottom, 5)
-    }
-
-    private var emptyTitle: LocalizedStringKey {
-        if !search.isEmpty { return "No matching downloads" }
-        if model.transfers.isEmpty { return "No downloads yet" }
-        return scope == .history ? "No finished downloads" : "No active downloads"
-    }
-
-    private var footer: some View {
-        HStack {
-            Button {
-                NSWorkspace.shared.open(model.workspace.destination)
-            } label: {
-                Label("Downloads folder", systemImage: "folder")
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
-            Spacer()
-            Button(action: openPreferences) {
-                Image(systemName: "gearshape")
-            }
-            .buttonStyle(.plain)
-            .help("Settings")
-            .accessibilityLabel("Settings")
-            .foregroundStyle(.secondary)
-            Menu {
-                if model.transfers.contains(where: { $0.state.terminal }) {
-                    Button("Clear Finished History…") { confirmClear = true }
+            HStack {
+                Text(scope.title).font(.headline)
+                Spacer()
+                Picker("File Type", selection: $fileKind) {
+                    ForEach(["All Types", "Documents", "Images", "Video", "Archives"], id: \.self) { kind in
+                        Text(LocalizedStringKey(kind)).tag(kind)
+                    }
+                }.frame(width: 180)
+            }.padding(.horizontal, 16).padding(.vertical, 8)
+            GeometryReader { geometry in
+            HStack(spacing: 0) {
+                if sidebar && (!inspector || geometry.size.width >= 950) {
+                    List(DownloadScope.allCases, selection: $scope) { category in
+                        HStack {
+                            Label(category.title, systemImage: category.symbol)
+                            Spacer()
+                            Text(String(model.transfers.filter(category.includes).count))
+                                .foregroundStyle(.secondary).monospacedDigit()
+                        }.tag(category)
+                    }
+                    .listStyle(.sidebar).frame(width: 180)
                     Divider()
                 }
-                Button("Quit VeloDrop") { NSApplication.shared.terminate(nil) }
-                    .keyboardShortcut("q")
-            } label: {
-                Image(systemName: "ellipsis.circle")
+                VStack(spacing: 0) {
+                    if let notice = model.notice {
+                        HStack {
+                            Label(notice, systemImage: "exclamationmark.circle").foregroundStyle(.orange)
+                            Spacer()
+                            Button { model.notice = nil } label: { Image(systemName: "xmark") }
+                                .buttonStyle(.borderless).help("Dismiss")
+                        }.padding(10)
+                    }
+                    table
+                }.frame(minWidth: 0, maxWidth: .infinity)
+                if inspector {
+                    Divider()
+                    ScrollView {
+                        if selection.count == 1, let item = selection.first {
+                            TransferInspector(transfer: item, model: model)
+                        } else {
+                            Text("Select a download to see its details.")
+                                .foregroundStyle(.secondary).padding(20)
+                        }
+                    }.frame(width: 260)
+                }
             }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .fixedSize()
-            .accessibilityLabel("More actions")
+            }
+            Divider()
+            HStack {
+                Text("\(visible.count) downloads").foregroundStyle(.secondary)
+                if !selected.isEmpty { Text("\(selected.count) selected").foregroundStyle(.secondary) }
+                Spacer()
+                Label(Format.rate(model.rate), systemImage: "arrow.down").monospacedDigit()
+                Button { NSWorkspace.shared.open(URL(fileURLWithPath: model.defaultFolder)) } label: {
+                    Image(systemName: "folder")
+                }.help("Downloads folder").buttonStyle(.borderless)
+            }.font(.caption).padding(.horizontal, 14).padding(.vertical, 9)
         }
-        .font(.system(size: 12))
-        .padding(.horizontal, 16)
-        .padding(.vertical, 11)
+        .sheet(isPresented: $showLink) { AddDownloadsView(model: model) }
+        .sheet(item: $deletion) { request in DeleteDownloadsView(ids: request.ids, model: model) }
+        .onChange(of: model.transfers.map(\.id)) { _, ids in selected.formIntersection(ids) }
+        .onChange(of: scope) { selected.removeAll() }
+        .dropDestination(for: URL.self) { urls, _ in
+            guard !urls.isEmpty, urls.allSatisfy(Transfer.supports) else { return false }
+            do { try model.addLinks(urls.map(\.absoluteString).joined(separator: "\n")); return true }
+            catch { model.notice = error.localizedDescription; return false }
+        }
     }
 
-    private func addLink() {
-        do {
-            try model.add(link)
-            link = ""
-            formError = nil
-            showLink = false
-            scope = .all
-        } catch {
-            formError = error.localizedDescription
+    private var toolbar: some View {
+        HStack(spacing: 12) {
+            Button {
+                if inspector { inspector = false; sidebar = true }
+                else { sidebar.toggle() }
+            } label: { Image(systemName: "sidebar.left") }.help("Toggle Sidebar")
+            Button { showLink = true } label: { Label("Add", systemImage: "plus") }.keyboardShortcut("n")
+            Divider().frame(height: 18)
+            Button { selection.filter { $0.state.running }.forEach(model.pause) } label: {
+                Image(systemName: "pause")
+            }.disabled(!selection.contains { $0.state.running }).help("Pause")
+            Button { selection.filter { $0.state == .paused || ($0.state == .failed && $0.url != nil) }.forEach(model.resume) } label: {
+                Image(systemName: "play")
+            }.disabled(!selection.contains { $0.state == .paused || ($0.state == .failed && $0.url != nil) }).help("Resume")
+            Button(role: .destructive) { delete(selected) } label: {
+                Label("Delete", systemImage: "trash").foregroundStyle(selected.isEmpty ? Color.secondary : .red)
+            }.disabled(selected.isEmpty).keyboardShortcut(.delete, modifiers: .command)
+            Spacer(minLength: 10)
+            TextField("Search Downloads", text: $search).textFieldStyle(.roundedBorder).frame(maxWidth: 240)
+            Button { inspector.toggle() } label: { Image(systemName: "sidebar.right") }.help("Download Details")
+            Button(action: openPreferences) { Image(systemName: "gearshape") }.help("Settings")
+        }.buttonStyle(.borderless).padding(14)
+    }
+
+    private var table: some View {
+        Table(visible, selection: $selected, sortOrder: $sortOrder) {
+            TableColumn("Name", value: \.displayName) { item in
+                HStack(spacing: 8) {
+                    Image(nsImage: NSWorkspace.shared.icon(for: UTType(filenameExtension: (item.displayName as NSString).pathExtension) ?? .data))
+                        .resizable().frame(width: 24, height: 24)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(item.displayName).lineLimit(1).truncationMode(.middle)
+                        if item.state.running { ProgressView(value: item.fraction ?? 0).controlSize(.mini) }
+                    }
+                }.padding(.vertical, 5).help(item.displayName)
+            }.width(min: 160, ideal: 220, max: .infinity)
+            TableColumn("Status", value: \.statusText) { item in
+                Text(item.statusText).foregroundStyle(item.state == .failed ? Color.orange : .secondary)
+            }.width(min: 90, ideal: 100, max: 115)
+            TableColumn("Size", value: \.total) { item in
+                Text(item.total > 0 ? Format.bytes(item.total) : "—").monospacedDigit()
+            }.width(min: 60, ideal: 70, max: 85)
+            TableColumn("Speed", value: \.speed) { item in
+                Text(item.state.running ? Format.rate(item.speed) : "—").monospacedDigit()
+            }.width(min: 65, ideal: 75, max: 90)
+            TableColumn("Remaining") { item in Text(item.remainingText).monospacedDigit() }.width(min: 65, ideal: 75, max: 90)
+
+        }
+        .contextMenu(forSelectionType: UUID.self) { ids in
+            if ids.count == 1, let item = model.transfers.first(where: { ids.contains($0.id) }) {
+                Button("Download Details") { model.onProgress?(item.id) }
+                if item.state == .awaitingConfirmation { Button("Confirm…") { model.askToConfirm(item) } }
+                if item.state == .completed {
+                    Button("Open File") { model.openFile(item) }
+                    Button("Show in Finder") { model.reveal(item) }
+                }
+            }
+            if !ids.isEmpty {
+                Divider()
+                Button("Delete Downloads?", role: .destructive) { delete(ids) }
+            }
+        } primaryAction: { ids in
+            guard let item = model.transfers.first(where: { ids.contains($0.id) }) else { return }
+            if item.state == .awaitingConfirmation { model.askToConfirm(item) }
+            else { model.onProgress?(item.id) }
+        }
+        .overlay {
+            if visible.isEmpty {
+                ContentUnavailableView {
+                    Label(search.isEmpty ? "No downloads yet" : "No matching downloads", systemImage: "tray")
+                } description: { Text("Add a link or download a file from Edge.") }
+                actions: {
+                    Button("Add download link") { showLink = true }
+                    Button("Edge Settings…", action: openPreferences)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Color(nsColor: .textBackgroundColor))
+            }
+        }
+    }
+
+    private func matchesType(_ item: Transfer) -> Bool {
+        guard fileKind != "All Types" else { return true }
+        guard let type = UTType(filenameExtension: (item.displayName as NSString).pathExtension) else { return false }
+        switch fileKind {
+        case "Images": return type.conforms(to: .image)
+        case "Video": return type.conforms(to: .movie)
+        case "Archives": return type.conforms(to: .archive) || type.conforms(to: .diskImage)
+        default: return type.conforms(to: .text) || type.conforms(to: .pdf) || type.conforms(to: .content)
+        }
+    }
+
+    private func delete(_ ids: Set<UUID>) {
+        guard !ids.isEmpty else { return }
+        deletion = DownloadDeletion(ids: ids)
+    }
+}
+
+private struct DownloadDeletion: Identifiable {
+    let id = UUID()
+    let ids: Set<UUID>
+}
+
+private enum DownloadScope: String, CaseIterable, Identifiable {
+    case all, active, waiting, paused, completed, attention
+    var id: Self { self }
+    var title: LocalizedStringKey {
+        switch self {
+        case .all: "All"
+        case .active: "In progress"
+        case .waiting: "Waiting"
+        case .paused: "Paused"
+        case .completed: "Finished"
+        case .attention: "Needs Attention"
+        }
+    }
+    var symbol: String {
+        switch self {
+        case .all: "tray.full"
+        case .active: "arrow.down.circle"
+        case .waiting: "clock"
+        case .paused: "pause.circle"
+        case .completed: "checkmark.circle"
+        case .attention: "exclamationmark.circle"
+        }
+    }
+    func includes(_ item: Transfer) -> Bool {
+        switch self {
+        case .all: true
+        case .active: item.state == .downloading
+        case .waiting: item.state == .queued || item.state == .awaitingConfirmation
+        case .paused: item.state == .paused
+        case .completed: item.state.terminal && item.state != .failed
+        case .attention: item.state == .failed
         }
     }
 }
 
-private struct TransferRow: View {
+extension Transfer {
+    var statusText: String {
+        switch state {
+        case .awaitingConfirmation: String(localized: "Waiting for confirmation")
+        case .queued: String(localized: "Waiting")
+        case .downloading: fraction.map { String(format: "%.0f%%", $0 * 100) } ?? String(localized: "Downloading")
+        case .paused: String(localized: "Paused")
+        case .completed: String(localized: "Completed")
+        case .failed: String(localized: "Download failed")
+        case .canceled: String(localized: "Canceled")
+        case .handedToBrowser: String(localized: "Sent back to Edge.")
+        }
+    }
+    var remainingText: String {
+        guard state == .downloading else { return "—" }
+        guard speed > 0, total > received else { return String(localized: "Estimating…") }
+        let seconds = (total - received) / speed
+        return Duration.seconds(seconds).formatted(.time(pattern: .hourMinuteSecond))
+    }
+}
+
+struct TransferInspector: View {
     let transfer: Transfer
     let model: DownloadModel
-    let showDetails: () -> Void
-    let confirmDownload: () -> Void
-    let deleteDownload: () -> Void
-    @State private var confirmTrash = false
-
     var body: some View {
-        HStack(spacing: 10) {
-            Image(systemName: symbol)
-                .foregroundStyle(transfer.state == .failed ? .orange : accent)
-                .font(.system(size: 17, weight: .medium))
-                .frame(width: 32, height: 36)
-                .background(.quaternary.opacity(0.6), in: RoundedRectangle(cornerRadius: 8))
-                .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 5) {
-                Button(action: showDetails) {
-                    Text(transfer.displayName)
-                        .font(.system(size: 12, weight: .semibold))
-                        .lineLimit(1).truncationMode(.middle)
-                }
-                .buttonStyle(.plain)
-                .help(transfer.displayName)
-                if !transfer.state.terminal && transfer.state != .awaitingConfirmation {
-                    ProgressView(value: transfer.fraction ?? 0)
-                        .controlSize(.small)
-                        .accessibilityLabel("Download progress")
-                }
-                Text(detail).font(.caption2).foregroundStyle(.secondary)
-                    .monospacedDigit().lineLimit(1)
-                    .help(detail)
+        VStack(alignment: .leading, spacing: 16) {
+            Text(transfer.displayName).font(.headline).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+            Text(transfer.statusText).foregroundStyle(.secondary)
+            Divider()
+            LabeledContent("Downloaded", value: Format.bytes(transfer.received))
+            LabeledContent("File Size", value: transfer.total > 0 ? Format.bytes(transfer.total) : "—")
+            LabeledContent("Remaining", value: transfer.remainingText)
+            LabeledContent("Active Connections", value: String(transfer.connections))
+            Divider()
+            Text("Save files to").font(.subheadline.weight(.medium))
+            Text(transfer.finalPath ?? model.workspace.directory(for: transfer).path)
+                .font(.caption).textSelection(.enabled)
+            if let source = transfer.sourceURL {
+                Text("Source").font(.subheadline.weight(.medium))
+                Text(source.absoluteString).font(.caption).textSelection(.enabled)
             }
-            Spacer(minLength: 4)
+            if let message = transfer.message { Text(message).foregroundStyle(.orange) }
             if transfer.state == .awaitingConfirmation {
-                Button("Confirm…", action: confirmDownload)
-                    .controlSize(.small)
-            } else if transfer.state.running {
-                icon("pause.fill", "Pause") { model.pause(transfer) }
-            } else if transfer.state == .paused || (transfer.state == .failed && transfer.url != nil) {
-                icon("play.fill", transfer.state == .paused ? "Resume" : "Retry") { model.resume(transfer) }
-            } else if transfer.state == .completed {
-                icon("folder", "Show in Finder") { model.reveal(transfer) }
+                Button("Confirm…") { model.askToConfirm(transfer) }.buttonStyle(.borderedProminent)
+            } else {
+                Button("Download Details") { model.onProgress?(transfer.id) }
             }
-            Button(action: deleteDownload) {
-                Image(systemName: "trash").foregroundStyle(.red)
-            }.buttonStyle(.borderless).help("Delete Downloads?")
+        }.padding(18).frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
 
-            Menu {
-                Button("Download Details", action: showDetails)
-                if !transfer.state.terminal {
-                    if transfer.fromBrowser {
-                        Button("Continue in Edge") { model.useEdge(transfer) }
-                    }
-                    Button("Cancel download", role: .destructive) { model.cancel(transfer) }
-                } else {
-                    if transfer.state == .completed {
-                        Button("Open File") { model.openFile(transfer) }
-                        Button("Show in Finder") { model.reveal(transfer) }
-                        Button("Move File to Trash…", role: .destructive) { confirmTrash = true }
-                    }
-                    Button("Delete Downloads?", role: .destructive, action: deleteDownload)
-                }
-            } label: {
-                Image(systemName: "ellipsis")
+private struct AddDownloadsView: View {
+    let model: DownloadModel
+    @Environment(\.dismiss) private var dismiss
+    @State private var text = ""
+    @State private var error: String?
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Add Downloads").font(.title2.weight(.semibold))
+            Text("Paste one HTTP or HTTPS link per line.").foregroundStyle(.secondary)
+            TextEditor(text: $text).font(.body.monospaced()).frame(height: 150).border(.quaternary)
+            if let error { Text(error).foregroundStyle(.red) }
+            HStack {
+                Button("Paste") { text = NSPasteboard.general.string(forType: .string) ?? "" }
+                Spacer()
+                Button("Cancel", role: .cancel) { dismiss() }.keyboardShortcut(.cancelAction)
+                Button("Start Download") {
+                    do { try model.addLinks(text); dismiss() }
+                    catch { self.error = error.localizedDescription }
+                }.buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction).disabled(text.isEmpty)
             }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .fixedSize()
-            .accessibilityLabel("Actions for \(transfer.name)")
-        }
-        .padding(8)
-        .frame(height: 66)
-        .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 10))
-        .alert("Move Download to Trash?", isPresented: $confirmTrash) {
-            Button("Move to Trash", role: .destructive) { model.trash(transfer) }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text(transfer.displayName)
-        }
+        }.padding(24).frame(width: 500)
     }
+}
 
-    private var symbol: String {
-        if transfer.state == .failed { return "exclamationmark.circle" }
-        guard let type = UTType(filenameExtension: (transfer.name as NSString).pathExtension) else {
-            return "doc"
-        }
-        if type.conforms(to: .archive) { return "doc.zipper" }
-        if type.conforms(to: .image) { return "photo" }
-        if type.conforms(to: .movie) { return "film" }
-        if type.conforms(to: .diskImage) { return "opticaldisc" }
-        return "doc"
-    }
-
-    private var detail: String {
-        switch transfer.state {
-        case .awaitingConfirmation: return String(localized: "Waiting for confirmation")
-        case .queued: return String(localized: "Waiting")
-        case .downloading, .paused:
-            let done = Format.bytes(transfer.received)
-            let size = transfer.total > 0 ? String(localized: "\(done) of \(Format.bytes(transfer.total))") : done
-            return transfer.state == .paused ? String(localized: "Paused · \(size)") : "\(size) · \(Format.rate(transfer.speed))"
-        case .completed:
-            let size = String(localized: "Downloaded · \(Format.bytes(transfer.received))")
-            let date = (transfer.finishedAt ?? transfer.updatedAt).formatted(date: .abbreviated, time: .shortened)
-            return [size, transfer.sourceURL?.host, date].compactMap { $0 }.joined(separator: " · ")
-        case .failed: return transfer.message ?? String(localized: "Download failed")
-        case .canceled: return String(localized: "Canceled")
-        }
-    }
-
-    private func icon(_ symbol: String, _ title: LocalizedStringKey, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Image(systemName: symbol).font(.system(size: 10, weight: .semibold))
-                .frame(width: 20, height: 20)
-        }
-        .buttonStyle(.borderless)
-        .help(title)
-        .accessibilityLabel(title)
+private struct DeleteDownloadsView: View {
+    let ids: Set<UUID>
+    let model: DownloadModel
+    @Environment(\.dismiss) private var dismiss
+    @AppStorage("deleteFilesByDefault") private var defaultFiles = true
+    @State private var files = true
+    @State private var remember = false
+    @State private var deleting = false
+    private var items: [Transfer] { model.transfers.filter { ids.contains($0.id) } }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Label("Delete Downloads?", systemImage: "trash").font(.title2.weight(.semibold))
+            Text("\(items.count) downloads · \(Format.bytes(items.reduce(0) { $0 + $1.received }))")
+            Picker("Delete", selection: $files) {
+                Text("Delete Files and History").tag(true)
+                Text("Delete History Only").tag(false)
+            }.pickerStyle(.radioGroup)
+            Text(files ? "Files will be moved to Trash. Active downloads will be stopped." : "Downloaded files will stay on disk.")
+                .font(.callout).foregroundStyle(.secondary)
+            Toggle("Remember this choice", isOn: $remember)
+            HStack {
+                Spacer()
+                Button("Cancel", role: .cancel) { dismiss() }.keyboardShortcut(.cancelAction)
+                Button("Delete", role: .destructive) {
+                    if remember { defaultFiles = files }
+                    deleting = true
+                    Task { await model.delete(ids, files: files); dismiss() }
+                }.tint(.red).buttonStyle(.borderedProminent)
+            }.disabled(deleting)
+        }.padding(24).frame(width: 440).onAppear { files = defaultFiles }
+            .interactiveDismissDisabled(deleting)
     }
 }
