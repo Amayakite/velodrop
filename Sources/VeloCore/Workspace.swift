@@ -117,7 +117,7 @@ public struct Workspace: Sendable {
                 continue
             }
         }
-        throw TransferError.engine("Couldn’t find an unused filename.")
+        throw TransferError.engine(String(localized: "Couldn’t find an unused filename."))
     }
 
     private func files(in directory: URL) -> [URL] {

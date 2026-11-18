@@ -130,7 +130,7 @@ final class DownloadModel {
                 transfers.insert(updated, at: 0)
             }
         } catch {
-            notice = "Couldn’t save the download state. \(error.localizedDescription)"
+            notice = String(localized: "Couldn’t save the download state. \(error.localizedDescription)")
         }
     }
 

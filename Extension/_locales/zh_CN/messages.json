@@ -1,0 +1,10 @@
+{
+  "extensionDescription": { "message": "将 Edge 中的普通文件下载交给 macOS 上的 VeloDrop。" },
+  "checkingConnection": { "message": "正在检查连接…" },
+  "connected": { "message": "已连接到 VeloDrop" },
+  "notConnected": { "message": "请在 VeloDrop 设置中配置 Edge" },
+  "autoTakeover": { "message": "自动接管下载" },
+  "minimumSize": { "message": "最小文件大小" },
+  "excludedHosts": { "message": "由 Edge 下载的网站" },
+  "settingsHint": { "message": "每行一个域名。最小文件大小设为 0 时，也会接管小文件。" }
+}

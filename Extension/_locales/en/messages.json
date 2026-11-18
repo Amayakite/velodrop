@@ -1,0 +1,10 @@
+{
+  "extensionDescription": { "message": "Send ordinary Edge file downloads to VeloDrop for macOS." },
+  "checkingConnection": { "message": "Checking connection…" },
+  "connected": { "message": "Connected to your Mac" },
+  "notConnected": { "message": "Set up Edge in VeloDrop Settings" },
+  "autoTakeover": { "message": "Automatically take over downloads" },
+  "minimumSize": { "message": "Minimum file size" },
+  "excludedHosts": { "message": "Keep these sites in Edge" },
+  "settingsHint": { "message": "One domain per line. Set the minimum to zero to include small files." }
+}

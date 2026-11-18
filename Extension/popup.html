@@ -6,15 +6,15 @@
 <link rel="stylesheet" href="popup.css">
 <header>
   <img src="Icon48.png" alt="" width="36" height="36">
-  <div><h1>VeloDrop</h1><p id="status" role="status">Checking connection…</p></div>
+  <div><h1>VeloDrop</h1><p id="status" role="status" data-message="checkingConnection"></p></div>
 </header>
 <main>
-  <label class="switch"><span>Automatically take over downloads</span><input id="enabled" type="checkbox"></label>
-  <label for="minimum">Minimum file size</label>
+  <label class="switch"><span data-message="autoTakeover"></span><input id="enabled" type="checkbox"></label>
+  <label for="minimum" data-message="minimumSize"></label>
   <div class="number"><input id="minimum" type="number" min="0" max="10240" step="1"><span>MiB</span></div>
-  <label for="hosts">Keep these sites in Edge</label>
+  <label for="hosts" data-message="excludedHosts"></label>
   <textarea id="hosts" rows="2" placeholder="example.com" spellcheck="false"></textarea>
-  <p class="hint">One domain per line. Set the minimum to zero to include small files.</p>
+  <p class="hint" data-message="settingsHint"></p>
 </main>
 <script type="module" src="popup.js"></script>
 </html>

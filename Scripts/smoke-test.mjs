@@ -15,6 +15,7 @@ const home = join(here, "app-data");
 const nativeDownloads = join(here, "native");
 const edgeDownloads = join(here, "browser");
 const env = { ...process.env, VELODROP_DATA: home, VELODROP_DESTINATION: nativeDownloads };
+const smokeLocale = process.env.VELODROP_SMOKE_LOCALE;
 const appLog = [];
 const edgeLog = [];
 const calls = [];
@@ -215,6 +216,7 @@ try {
     "--headless=new", "--no-first-run", "--no-default-browser-check", "--disable-background-networking",
     "--remote-debugging-pipe", "--enable-unsafe-extension-debugging", "--user-data-dir=" + profile,
     "--load-extension=" + extension,
+    ...(smokeLocale ? ["--lang=" + smokeLocale, "-AppleLanguages", "(" + smokeLocale + ")"] : []),
   ], { env, stdio: ["ignore", "ignore", "pipe", "pipe", "pipe"] }, edgeLog);
   const cdp = new CDP(browser);
   await cdp.send("Browser.getVersion");
@@ -230,7 +232,22 @@ try {
   const popup = await cdp.tab("chrome-extension://" + id + "/popup.html");
   await waitFor("Edge extension connection", async () =>
     (await cdp.run(popup, 'document.querySelector("#status")?.dataset.connected')) === "true", 6000);
-  console.log("Edge extension loaded and connected to the native host.");
+  const popupLabels = await cdp.run(popup, `({
+    language: document.documentElement.lang,
+    autoTakeover: document.querySelector("[data-message=autoTakeover]").textContent,
+    connection: document.querySelector("#status").textContent,
+  })`);
+  if (smokeLocale) assert.equal(popupLabels.language, smokeLocale);
+  if (popupLabels.language === "zh-CN") {
+    assert.equal(popupLabels.autoTakeover, "自动接管下载");
+    assert.equal(popupLabels.connection, "已连接到 VeloDrop");
+  } else if (popupLabels.language.startsWith("en")) {
+    assert.equal(popupLabels.autoTakeover, "Automatically take over downloads");
+    assert.equal(popupLabels.connection, "Connected to your Mac");
+  } else {
+    assert.ok(popupLabels.autoTakeover && popupLabels.connection);
+  }
+  console.log("Edge extension loaded and connected to the native host (" + popupLabels.language + ").");
 
   const start = route => cdp.run(page, `(() => {
     const link = document.createElement("a"); link.href = ${JSON.stringify(base + "/" + route)};

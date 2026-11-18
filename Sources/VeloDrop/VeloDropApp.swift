@@ -18,7 +18,8 @@ struct VeloDropApp: App {
                     Text(Format.rate(model.rate)).monospacedDigit()
                 }
             }
-            .accessibilityLabel(model.activeCount > 0 ? "VeloDrop, \(model.activeCount) active" : "VeloDrop")
+            .accessibilityLabel(model.activeCount > 0
+                                ? String(localized: "VeloDrop, \(model.activeCount) active") : "VeloDrop")
             .task { lifecycle.model = model }
         }
         .menuBarExtraStyle(.window)

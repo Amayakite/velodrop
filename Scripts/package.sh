@@ -6,7 +6,8 @@ engine="$root/.build/engine-$(uname -m)"
 out="${1:-$root/.dist}"
 app="$out/VeloDrop.app"
 identity="${VELODROP_SIGN_IDENTITY:--}"
-version=0.1.0
+version="$(plutil -extract version raw -o - "$root/Extension/manifest.json")"
+dmg="VeloDrop-$version-macos-$(uname -m).dmg"
 
 "$root/Scripts/build-engine.sh"
 swift build -c release
@@ -18,7 +19,9 @@ iconutil -c icns "$assets/AppIcon.iconset" -o "$assets/AppIcon.icns"
 mkdir -p "$out"
 tmp="$(mktemp -d "$out/.velodrop.XXXXXX")"
 trap 'rm -rf "$tmp"' EXIT
-staged="$tmp/VeloDrop.app"
+volume="$tmp/volume"
+mkdir -p "$volume"
+staged="$volume/VeloDrop.app"
 contents="$staged/Contents"
 resources="$contents/Resources"
 mkdir -p "$contents/MacOS" "$contents/Helpers" "$resources/EdgeExtension" "$resources/Notices"
@@ -39,13 +42,14 @@ cat > "$contents/Info.plist" <<PLIST
 <dict>
     <key>CFBundleIdentifier</key><string>com.amayakite.velodrop</string>
     <key>CFBundleDevelopmentRegion</key><string>en</string>
+    <key>CFBundleLocalizations</key><array><string>en</string><string>zh-Hans</string></array>
     <key>CFBundleName</key><string>VeloDrop</string>
     <key>CFBundleDisplayName</key><string>VeloDrop</string>
     <key>CFBundleExecutable</key><string>VeloDrop</string>
     <key>CFBundleIconFile</key><string>AppIcon</string>
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>CFBundleShortVersionString</key><string>$version</string>
-    <key>CFBundleVersion</key><string>1</string>
+    <key>CFBundleVersion</key><string>2</string>
     <key>LSMinimumSystemVersion</key><string>14.0</string>
     <key>LSUIElement</key><true/>
     <key>NSHighResolutionCapable</key><true/>
@@ -59,10 +63,10 @@ codesign "${flags[@]}" "$contents/Helpers/aria2c"
 codesign "${flags[@]}" "$contents/Helpers/VeloBridge"
 codesign "${flags[@]}" "$staged"
 codesign --verify --deep --strict "$staged"
+ln -s /Applications "$volume/Applications"
+hdiutil create -volname "VeloDrop $version" -fs HFS+ -format UDZO -srcfolder "$volume" "$tmp/$dmg"
+hdiutil verify "$tmp/$dmg"
 if [[ -e "$app" ]]; then rm -rf "$app"; fi
 mv "$staged" "$app"
-
-zip="$out/VeloDrop-$version-macos-$(uname -m).zip"
-[[ ! -f "$zip" ]] || rm "$zip"
-ditto -c -k --sequesterRsrc --keepParent "$app" "$zip"
-printf '%s\n' "$zip"
+mv -f "$tmp/$dmg" "$out/$dmg"
+printf '%s\n' "$out/$dmg"

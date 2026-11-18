@@ -56,3 +56,6 @@
 "Sent back to Edge." = "已交还给 Edge。";
 "The download engine disconnected." = "下载引擎已断开。";
 "The download engine lost this task." = "下载引擎丢失了这个任务。";
+"VeloDrop, %lld active" = "VeloDrop，%lld 个下载任务";
+"Couldn’t save the download state. %@" = "无法保存下载状态。%@";
+"Couldn’t find an unused filename." = "找不到可用的文件名。";

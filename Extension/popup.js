@@ -1,3 +1,8 @@
+document.documentElement.lang = chrome.i18n.getUILanguage();
+for (const element of document.querySelectorAll("[data-message]")) {
+  element.textContent = chrome.i18n.getMessage(element.dataset.message);
+}
+
 const enabled = document.querySelector("#enabled");
 const minimum = document.querySelector("#minimum");
 const hosts = document.querySelector("#hosts");
@@ -16,4 +21,4 @@ minimum.addEventListener("change", () => {
 hosts.addEventListener("input", () => chrome.storage.local.set({ excludedHosts: hosts.value }));
 const connection = await chrome.runtime.sendMessage({ action: "ping" }).catch(() => null);
 status.dataset.connected = String(Boolean(connection?.ok));
-status.textContent = connection?.ok ? "Connected to your Mac" : "Set up Edge in VeloDrop Settings";
+status.textContent = chrome.i18n.getMessage(connection?.ok ? "connected" : "notConnected");

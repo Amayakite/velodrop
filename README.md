@@ -4,11 +4,13 @@ VeloDrop 是一款原生 macOS 下载器。菜单栏显示下载速度，点开�
 
 ## 安装
 
-1. 从 [GitHub Releases](https://github.com/Amayakite/velodrop/releases) 下载 ZIP，解压后把 `VeloDrop.app` 放进「应用程序」并打开。现成安装包适用于 Apple 芯片和 macOS 14 或更新版本。
+1. 从 [GitHub Releases](https://github.com/Amayakite/velodrop/releases) 下载 DMG，双击打开，把 `VeloDrop.app` 拖到同一窗口里的「Applications」快捷入口，然后从「应用程序」打开。现成安装包适用于 Apple 芯片和 macOS 14 或更新版本。
 2. 点击菜单栏的下载箭头，打开「设置」，再点击「配置 Edge」。VeloDrop 会为当前用户注册连接器，打开 Edge 的扩展页，并在访达中显示扩展文件夹。
-3. 在 Edge 打开「开发人员模式」，点击「加载解压缩的扩展」，选择访达里高亮的 `EdgeExtension` 文件夹。点击 Edge 工具栏上的小图标，确认显示已连接。初次切换时，可以先停用 FDM 等其他下载接管扩展。
+3. 在 Edge 打开「开发人员模式」，点击「加载解压缩的扩展」，选择访达里高亮的 `EdgeExtension` 文件夹。点击 Edge 工具栏上的小图标，确认显示已连接。升级时，在 Edge 扩展页点击 VeloDrop 的「重新加载」。初次切换时，可以先停用 FDM 等其他下载接管扩展。
 
 GitHub 预发行包使用 ad-hoc 签名，尚未经过 Apple 公证。也可以在本机按下文从源码构建。打包脚本支持现有的 Developer ID 证书。
+
+Mac 应用和 Edge 扩展均支持简体中文和英文，分别跟随 macOS 和 Edge 的界面语言。
 
 ## 使用
 
