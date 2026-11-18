@@ -7,6 +7,8 @@ private let accent = Color(red: 0.21, green: 0.39, blue: 0.93)
 
 struct DownloadsPanel: View {
     let model: DownloadModel
+    var inWindow = false
+    let openPreferences: () -> Void
     @State private var showLink = false
     @State private var link = ""
     @State private var formError: String?
@@ -53,13 +55,13 @@ struct DownloadsPanel: View {
                     .padding(.horizontal, 12)
                     .padding(.bottom, 12)
                 }
-                .frame(height: min(CGFloat(visible.count) * 73 + 10, 324))
+                .frame(height: inWindow ? nil : min(CGFloat(visible.count) * 73 + 10, 324))
                 .accessibilityLabel("Download list")
             }
             Divider()
             footer
         }
-        .frame(width: 382)
+        .frame(width: inWindow ? 408 : 382)
         .tint(accent)
     }
 
@@ -131,9 +133,13 @@ struct DownloadsPanel: View {
             if model.transfers.isEmpty {
                 Text("Add a link or download a file from Edge.")
                     .font(.caption).foregroundStyle(.secondary)
+                if inWindow {
+                    Button("Edge Settings…", action: openPreferences)
+                        .padding(.top, 5)
+                }
             }
         }
-        .frame(maxWidth: .infinity)
+        .frame(maxWidth: .infinity, maxHeight: inWindow ? .infinity : nil)
         .padding(.vertical, 20)
         .padding(.bottom, 5)
     }
@@ -153,7 +159,7 @@ struct DownloadsPanel: View {
             .buttonStyle(.plain)
             .foregroundStyle(.secondary)
             Spacer()
-            SettingsLink {
+            Button(action: openPreferences) {
                 Image(systemName: "gearshape")
             }
             .buttonStyle(.plain)

@@ -3,7 +3,7 @@
   "name": "VeloDrop",
   "description": "__MSG_extensionDescription__",
   "default_locale": "en",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "minimum_chrome_version": "120",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA0+EPLNHt67RFjk+ReMxq7UD0aVJqQLGTsl6KmXm2bc8Lq/18DabjmFLr81HKsJuQxTkwaR4jZaMVJvQfMJIvsvVt+2DfOY1T2P/KR5dAlenLHRpIrtcr/x80AloywH1WumEIyhCVeM06tWnU5ecLrfU8G1LLlLckY1j/XRypPBZczre6Yq99LY3761E5x7n1JYh/32oLaHaAetdTQgDVAh1s4tDW721M2Gt5CS+U87owcXEm1AcNb6PJm6lBHagfXA5cxsmKYVrZpJymWdg9ChuCu72jaO1yEAxN/xVN3BHmFDpLexJYIA/TNDlqcvUIsuoQLJHAm6wDaHWgvLSuDwIDAQAB",
   "incognito": "not_allowed",

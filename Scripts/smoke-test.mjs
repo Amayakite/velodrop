@@ -208,7 +208,7 @@ try {
     allowed_origins: ["chrome-extension://" + id + "/"],
   }));
 
-  const startDesktop = () => child(desktopBinary, [], { env }, appLog);
+  const startDesktop = () => child(desktopBinary, [], { env: { ...env, VELODROP_BACKGROUND_LAUNCH: "1" } }, appLog);
   assert.equal(runningDesktop(), null, "Quit the packaged test build before running this test.");
   assert.equal(nativeMessage({ action: "ping" }).ok, true);
 

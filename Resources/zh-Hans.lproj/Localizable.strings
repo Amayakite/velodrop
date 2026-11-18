@@ -33,11 +33,9 @@
 "Canceled" = "已取消";
 "Connections per file" = "每个文件的连接数";
 "Save files to" = "保存位置";
-"Register VeloDrop, then turn on Developer mode in Edge and choose Load unpacked. Select the EdgeExtension folder shown in Finder." = "注册连接器后，在 Edge 中启用开发人员模式，点击「加载解压缩的扩展」，选择访达中显示的 EdgeExtension 文件夹。";
 "Set Up Edge…" = "配置 Edge…";
 "Disconnect" = "断开连接";
 "VeloDrop Settings" = "VeloDrop 设置";
-"The Edge connector is registered. Load the extension from Finder." = "连接器已注册。请在 Edge 中加载访达显示的扩展目录。";
 "The connector was removed. You can remove the extension in Edge." = "连接器已移除。你可以在 Edge 中移除扩展。";
 "Enter a valid HTTP or HTTPS link." = "请输入有效的 HTTP 或 HTTPS 链接。";
 "The download engine could not start." = "下载引擎未能启动。";
@@ -59,3 +57,9 @@
 "VeloDrop, %lld active" = "VeloDrop，%lld 个下载任务";
 "Couldn’t save the download state. %@" = "无法保存下载状态。%@";
 "Couldn’t find an unused filename." = "找不到可用的文件名。";
+"Edge Settings…" = "Edge 设置…";
+"Set Up Edge opens the extensions page and copies the extension folder path." = "点击「配置 Edge」会打开扩展页，并把扩展文件夹的路径复制到剪贴板。";
+"Turn on Developer mode in Edge and choose Load unpacked. In the folder picker, press ⇧⌘G, paste the path, press Return, then choose Select Folder." = "在 Edge 启用「开发人员模式」，点击「加载解压缩的扩展」。在选择文件夹窗口按 ⇧⌘G，粘贴路径，按回车，再点击「选择文件夹」。";
+"Copy Extension Path" = "复制扩展路径";
+"Extension path copied." = "已复制扩展路径。";
+"Couldn’t copy the extension path. You can open the folder in Finder." = "无法复制扩展路径。可以在访达中显示扩展文件夹。";

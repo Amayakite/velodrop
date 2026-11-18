@@ -12,7 +12,7 @@ private struct EdgeRegistration {
             .appendingPathComponent(BundleLayout.identifier + ".json")
     }
 
-    func install() throws -> URL {
+    func install() throws {
         let extensionFolder = BundleLayout.browserExtension(in: bundle)
         let data = try Data(contentsOf: extensionFolder.appendingPathComponent("manifest.json"))
         guard let manifest = try JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -35,7 +35,6 @@ private struct EdgeRegistration {
                                                 withIntermediateDirectories: true)
         try JSONSerialization.data(withJSONObject: host, options: [.prettyPrinted, .sortedKeys])
             .write(to: hostManifest, options: .atomic)
-        return extensionFolder
     }
 
     func remove() throws {
@@ -49,6 +48,10 @@ struct PreferencesView: View {
     @State private var message: String?
     @State private var error = false
 
+    private var extensionFolder: URL {
+        BundleLayout.browserExtension(in: Bundle.main.bundleURL)
+    }
+
     var body: some View {
         Form {
             Section("Downloads") {
@@ -60,13 +63,20 @@ struct PreferencesView: View {
             }
 
             Section("Microsoft Edge") {
-                Text("Register VeloDrop, then turn on Developer mode in Edge and choose Load unpacked. Select the EdgeExtension folder shown in Finder.")
+                Text("Set Up Edge opens the extensions page and copies the extension folder path.")
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text("Turn on Developer mode in Edge and choose Load unpacked. In the folder picker, press ⇧⌘G, paste the path, press Return, then choose Select Folder.")
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 HStack {
                     Button("Set Up Edge…", action: install)
-                    Button("Disconnect", action: disconnect)
+                    Button("Copy Extension Path", action: copyPath)
+                    Button("Show in Finder") {
+                        NSWorkspace.shared.activateFileViewerSelecting([extensionFolder])
+                    }
                 }
+                Button("Disconnect", action: disconnect)
                 if let message {
                     Label(message, systemImage: error ? "exclamationmark.circle" : "checkmark.circle")
                         .foregroundStyle(error ? .orange : .secondary)
@@ -80,19 +90,27 @@ struct PreferencesView: View {
 
     private func install() {
         do {
-            let folder = try EdgeRegistration(bundle: Bundle.main.bundleURL).install()
+            try EdgeRegistration(bundle: Bundle.main.bundleURL).install()
+            copyPath()
             if let edge = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.microsoft.edgemac"),
                let url = URL(string: "edge://extensions/") {
                 NSWorkspace.shared.open([url], withApplicationAt: edge, configuration: NSWorkspace.OpenConfiguration(),
                                         completionHandler: nil)
             }
-            NSWorkspace.shared.activateFileViewerSelecting([folder])
-            message = String(localized: "The Edge connector is registered. Load the extension from Finder.")
-            error = false
         } catch {
             message = error.localizedDescription
             self.error = true
         }
+    }
+
+    private func copyPath() {
+        let clipboard = NSPasteboard.general
+        clipboard.clearContents()
+        let copied = clipboard.setString(extensionFolder.path(percentEncoded: false), forType: .string)
+        message = copied
+            ? String(localized: "Extension path copied.")
+            : String(localized: "Couldn’t copy the extension path. You can open the folder in Finder.")
+        error = !copied
     }
 
     private func disconnect() {
