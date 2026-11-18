@@ -1,0 +1,41 @@
+--- a/src/HttpRequest.cc
++++ b/src/HttpRequest.cc
+@@ -265,12 +265,25 @@
+       builtinHds.emplace_back("Want-Digest:", wantDigest);
+     }
+   }
++  auto firstHeader = std::begin(headers_);
++  const auto lastHeader = std::end(headers_);
++  const std::string scope = "X-VeloDrop-Request-URL: ";
++  // Browser credentials apply only to the original request URL. Redirects
++  // must never receive them, including redirects to another path on the host.
++  if (firstHeader != lastHeader && util::istartsWith(*firstHeader, scope)) {
++    if (firstHeader->substr(scope.size()) == request_->getCurrentUri()) {
++      ++firstHeader;
++    }
++    else {
++      firstHeader = lastHeader;
++    }
++  }
+   for (const auto& builtinHd : builtinHds) {
+-    auto it = std::find_if(std::begin(headers_), std::end(headers_),
++    auto it = std::find_if(firstHeader, lastHeader,
+                            [&builtinHd](const std::string& hd) {
+                              return util::istartsWith(hd, builtinHd.first);
+                            });
+-    if (it == std::end(headers_)) {
++    if (it == lastHeader) {
+       requestLine += builtinHd.first;
+       requestLine += ' ';
+       requestLine += builtinHd.second;
+@@ -278,8 +291,8 @@
+     }
+   }
+   // append additional headers given by user.
+-  for (const auto& hd : headers_) {
+-    requestLine += hd;
++  for (auto it = firstHeader; it != lastHeader; ++it) {
++    requestLine += *it;
+     requestLine += "\r\n";
+   }
+   requestLine += "\r\n";

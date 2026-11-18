@@ -4,7 +4,10 @@ cd "$(dirname "$0")/.."
 version=1.37.0
 archive="aria2-$version.tar.xz"
 hash=60a420ad7085eb616cb6e2bdf0a7206d68ff3d37fb5a956dc44242eb2f79b66b
-build="$(pwd)/.build/engine-$(uname -m)"
+root="$(pwd)"
+build="$root/.build/engine-$(uname -m)"
+patch="$root/Scripts/aria2-scoped-headers.patch"
+patch_hash="$(shasum -a 256 "$patch" | cut -d ' ' -f 1)"
 mkdir -p "$build"
 cd "$build"
 if [[ ! -f "$archive" ]]; then
@@ -12,9 +15,10 @@ if [[ ! -f "$archive" ]]; then
     mv "$archive.tmp" "$archive"
 fi
 printf '%s  %s\n' "$hash" "$archive" | shasum -a 256 -c -
-if [[ ! -x aria2c ]]; then
+if [[ ! -x aria2c || "$(cat applied-patch 2>/dev/null || true)" != "$patch_hash" ]]; then
     tar -xf "$archive"
     cd "aria2-$version"
+    patch -p1 < "$patch"
     export MACOSX_DEPLOYMENT_TARGET=14.0
     ./configure --with-appletls --without-openssl --without-gnutls --without-libcares \
         --without-sqlite3 --without-libssh2 --without-libxml2 --without-libexpat \
@@ -22,5 +26,6 @@ if [[ ! -x aria2c ]]; then
     make -j "$(sysctl -n hw.logicalcpu)" > ../make.log 2>&1
     cp src/aria2c ../aria2c
     strip -x ../aria2c
+    printf '%s\n' "$patch_hash" > ../applied-patch
 fi
 "$build/aria2c" --version | head -8

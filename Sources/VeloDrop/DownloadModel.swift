@@ -11,6 +11,17 @@ final class DownloadModel {
         didSet { UserDefaults.standard.set(maxConnections, forKey: "maxConnections") }
     }
 
+    var confirmBrowserDownloads: Bool {
+        didSet { UserDefaults.standard.set(confirmBrowserDownloads, forKey: "confirmBrowserDownloads") }
+    }
+    var showWindowOnCapture: Bool {
+        didSet { UserDefaults.standard.set(showWindowOnCapture, forKey: "showWindowOnCapture") }
+    }
+    var confirmation: Transfer?
+    @ObservationIgnored var onBrowserIntake: (() -> Void)?
+    @ObservationIgnored private var shouldShowIntake = false
+    @ObservationIgnored private var browserHeaders: [UUID: BrowserHeaders] = [:]
+
     let workspace: Workspace
     @ObservationIgnored private let engine: AriaEngine
     @ObservationIgnored private var inbox: FolderMonitor?
@@ -27,6 +38,8 @@ final class DownloadModel {
         self.engine = AriaEngine(executable: override ?? executable, workingDirectory: workspace.root)
         self.maxConnections = [1, 4, 8, 16].contains(UserDefaults.standard.integer(forKey: "maxConnections"))
             ? UserDefaults.standard.integer(forKey: "maxConnections") : 8
+        confirmBrowserDownloads = UserDefaults.standard.bool(forKey: "confirmBrowserDownloads")
+        showWindowOnCapture = UserDefaults.standard.object(forKey: "showWindowOnCapture") as? Bool ?? true
 
         do {
             try workspace.prepare()
@@ -37,9 +50,10 @@ final class DownloadModel {
                 notice = String(localized: "VeloDrop is already running.")
                 return
             }
+            workspace.expireOldOutcomes()
             transfers = workspace.all()
             for var transfer in transfers where transfer.state.running || transfer.state == .paused {
-                if let output = workspace.recoveredOutput(transfer.id) {
+                if let output = workspace.recoveredOutput(transfer) {
                     finish(transfer, at: output)
                     continue
                 }
@@ -76,6 +90,35 @@ final class DownloadModel {
 
     func useEdge(_ transfer: Transfer) {
         change(transfer.id, to: .failed, message: String(localized: "Sent back to Edge."))
+        if confirmation?.id == transfer.id { confirmation = nil }
+        NSRunningApplication.runningApplications(withBundleIdentifier: "com.microsoft.edgemac")
+            .first?.activate()
+    }
+
+    func showPendingIntake() {
+        guard shouldShowIntake, let onBrowserIntake else { return }
+        shouldShowIntake = false
+        onBrowserIntake()
+    }
+
+    func askToConfirm(_ transfer: Transfer) {
+        guard transfer.state == .awaitingConfirmation else { return }
+        confirmation = transfer
+    }
+
+    func confirmNextIfNeeded() {
+        guard confirmation == nil else { return }
+        confirmation = transfers.last { $0.state == .awaitingConfirmation }
+    }
+
+    func confirm(_ transfer: Transfer, into directory: URL) {
+        guard var item = transfers.first(where: { $0.id == transfer.id }),
+              item.state == .awaitingConfirmation else { return }
+        item.destinationPath = directory.standardizedFileURL.path
+        item.state = .queued
+        save(item)
+        confirmation = nil
+        startLoop()
     }
 
     func reveal(_ transfer: Transfer) {
@@ -84,14 +127,33 @@ final class DownloadModel {
         }
     }
 
+    func openFile(_ transfer: Transfer) {
+        if let path = transfer.finalPath, !NSWorkspace.shared.open(URL(fileURLWithPath: path)) {
+            notice = String(localized: "The downloaded file could not be opened.")
+        }
+    }
+
     func removeHistory(_ transfer: Transfer) {
-        guard transfer.state.terminal,
-              !transfer.fromBrowser || Date().timeIntervalSince(transfer.updatedAt) > 120 else { return }
-        let path = workspace.records.appendingPathComponent(transfer.id.uuidString + ".json")
+        guard let item = transfers.first(where: { $0.id == transfer.id }), item.state.terminal else { return }
         do {
-            try FileManager.default.removeItem(at: path)
-            try? FileManager.default.removeItem(at: workspace.stage(transfer.id))
-            transfers.removeAll { $0.id == transfer.id }
+            try workspace.removeHistory(item)
+            try? FileManager.default.removeItem(at: workspace.stage(item.id))
+            transfers.removeAll { $0.id == item.id }
+        } catch {
+            notice = error.localizedDescription
+        }
+    }
+
+    func trash(_ transfer: Transfer) {
+        guard transfer.state == .completed, let path = transfer.finalPath else { return }
+        let url = URL(fileURLWithPath: path)
+        guard workspace.ownsPublishedFile(url, id: transfer.id) else {
+            notice = String(localized: "The original downloaded file is no longer at this location.")
+            return
+        }
+        do {
+            try FileManager.default.trashItem(at: url, resultingItemURL: nil)
+            removeHistory(transfer)
         } catch {
             notice = error.localizedDescription
         }
@@ -113,6 +175,8 @@ final class DownloadModel {
         item.message = message
         item.speed = 0
         item.connections = 0
+        item.finishedAt = state.terminal ? Date() : nil
+        if state.terminal { browserHeaders.removeValue(forKey: id) }
         if state == .canceled || (state == .failed && item.fromBrowser) { item.url = nil }
         save(item)
         startLoop()
@@ -135,13 +199,38 @@ final class DownloadModel {
     }
 
     private func drainInbox() {
-        for (path, transfer) in workspace.incoming() {
-            if workspace.read(transfer.id) == nil && !workspace.wasAbandoned(transfer.id) {
+        for (path, var transfer, headers) in workspace.incoming() {
+            if workspace.browserStatus(transfer.id) == nil && !workspace.wasAbandoned(transfer.id) {
+                if confirmBrowserDownloads && transfer.fromBrowser && transfer.browserHeaderNames != nil {
+                    transfer.state = .awaitingConfirmation
+                }
                 save(transfer)
+                if transfers.contains(where: { $0.id == transfer.id }) {
+                    if !headers.fields.isEmpty { browserHeaders[transfer.id] = headers }
+                    if transfer.state == .awaitingConfirmation && confirmation == nil {
+                        confirmation = transfer
+                    }
+                    if transfer.fromBrowser && (showWindowOnCapture || transfer.state == .awaitingConfirmation) {
+                        shouldShowIntake = true
+                    }
+                }
             }
             try? FileManager.default.removeItem(at: path)
         }
+        showPendingIntake()
         startLoop()
+    }
+
+    private func attach(_ transfer: Transfer) async throws {
+        var item = transfer
+        let headers = browserHeaders[item.id]
+        if item.requiresBrowserSession == true && headers?.requiresSession != true {
+            throw TransferError.engine(String(localized: "The browser session is no longer available."))
+        }
+        guard let url = item.url else { throw TransferError.invalidURL }
+        item.effectiveProxy = try ProxyRouting.route(item.browserProxy, for: url)
+        if item.effectiveProxy != transfer.effectiveProxy { save(item) }
+        try await engine.add(item, stage: workspace.stage(item.id), connections: maxConnections, headers: headers)
     }
 
     private func startLoop() {
@@ -158,6 +247,7 @@ final class DownloadModel {
             let snapshot = transfers
             for item in snapshot where item.fromBrowser && !item.state.terminal && workspace.wasAbandoned(item.id) {
                 change(item.id, to: .canceled)
+                if confirmation?.id == item.id { confirmation = nil }
             }
 
             let stale = engine.attached.filter { id in transfers.first { $0.id == id }?.state.terminal ?? true }
@@ -187,7 +277,7 @@ final class DownloadModel {
                     guard let current = transfers.first(where: { $0.id == item.id }), current.state.running else { continue }
                     if let status = statuses[item.id] {
                         if status.status == "paused" {
-                            try await engine.add(current, stage: workspace.stage(item.id), connections: maxConnections)
+                            try await attach(current)
                         } else {
                             await update(item.id, with: status)
                         }
@@ -196,7 +286,7 @@ final class DownloadModel {
                         change(item.id, to: .failed, message: String(localized: "The download engine lost this task."))
                     } else {
                         do {
-                            try await engine.add(current, stage: workspace.stage(item.id), connections: maxConnections)
+                            try await attach(current)
                         } catch {
                             change(item.id, to: .failed, message: error.localizedDescription)
                         }
@@ -236,6 +326,8 @@ final class DownloadModel {
         completed.url = nil
         completed.speed = 0
         completed.connections = 0
+        completed.finishedAt = Date()
+        browserHeaders.removeValue(forKey: completed.id)
         save(completed)
         if workspace.read(transfer.id)?.state == .completed {
             try? FileManager.default.removeItem(at: workspace.stage(transfer.id))

@@ -9,16 +9,17 @@ private struct Request: Codable {
     var url: URL?
     var name: String?
     var size: Int64?
+    var source: URL?
+    var referrer: URL?
+    var mimeType: String?
+    var headers: [String: String]?
+    var proxy: BrowserProxy?
 }
 
 private struct Reply: Encodable {
     let ok: Bool
-    var jobs: [String: Status]?
-}
-
-private struct Status: Encodable {
-    let state: TransferState
-    let updatedAt: Int64
+    var jobs: [String: Workspace.BrowserStatus]?
+    var appRunning: Bool?
 }
 
 private func handle(_ data: Data, bundle: URL) throws -> Reply {
@@ -34,9 +35,23 @@ private func handle(_ data: Data, bundle: URL) throws -> Reply {
     case "submit":
         guard let id = request.id, let url = request.url, let name = request.name,
               !workspace.wasAbandoned(id) else { return Reply(ok: false) }
-        let transfer = try Transfer(id: id, url: url, name: name, fromBrowser: true,
+        var transfer = try Transfer(id: id, url: url, name: name, fromBrowser: true,
                                     expectedBytes: request.size.flatMap { $0 > 0 ? $0 : nil })
-        try workspace.submit(transfer)
+        let headers = BrowserHeaders(request.headers ?? [:])
+        transfer.sourceURL = Transfer.displayURL(request.source ?? url)
+        transfer.referringPage = Transfer.displayURL(request.referrer)
+        transfer.mimeType = request.mimeType.map { String($0.prefix(128)) }
+        transfer.browserHeaderNames = request.headers.map { _ in headers.fields.keys.sorted() }
+        transfer.requiresBrowserSession = headers.requiresSession
+        if let proxy = request.proxy, proxy.mode == .fixed {
+            guard let endpoint = proxy.endpoint, let verified = BrowserProxy.http(endpoint) else {
+                return Reply(ok: false)
+            }
+            transfer.browserProxy = verified
+        } else {
+            transfer.browserProxy = request.proxy?.mode == .direct ? .direct : .system
+        }
+        try workspace.submit(transfer, headers: headers)
         do { try launch(bundle) }
         catch {
             try? workspace.abandon(id)
@@ -45,14 +60,18 @@ private func handle(_ data: Data, bundle: URL) throws -> Reply {
         return Reply(ok: true)
 
     case "status":
-        var statuses: [String: Status] = [:]
+        var statuses: [String: Workspace.BrowserStatus] = [:]
         for value in (request.ids ?? []).prefix(192) {
-            if let id = UUID(uuidString: value), let job = workspace.read(id) {
-                statuses[value] = Status(state: job.state,
-                                         updatedAt: Int64(job.updatedAt.timeIntervalSince1970 * 1000))
+            if let id = UUID(uuidString: value), let status = workspace.browserStatus(id) {
+                statuses[value] = status
             }
         }
-        return Reply(ok: true, jobs: statuses)
+        return Reply(ok: true, jobs: statuses, appRunning: workspace.appIsRunning)
+
+    case "acknowledge":
+        guard let id = request.id else { return Reply(ok: false) }
+        workspace.acknowledge(id)
+        return Reply(ok: true)
 
     case "abandon":
         guard let id = request.id else { return Reply(ok: false) }
@@ -66,7 +85,8 @@ private func handle(_ data: Data, bundle: URL) throws -> Reply {
 
 private func launch(_ bundle: URL) throws {
     if ProcessInfo.processInfo.environment["VELODROP_TEST_NO_LAUNCH"] == "1" { return }
-    if !NSRunningApplication.runningApplications(withBundleIdentifier: BundleLayout.identifier).isEmpty { return }
+    let identifier = Bundle(url: bundle)?.bundleIdentifier ?? BundleLayout.identifier
+    if !NSRunningApplication.runningApplications(withBundleIdentifier: identifier).isEmpty { return }
     let process = Process()
     process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
     let environment = ProcessInfo.processInfo.environment

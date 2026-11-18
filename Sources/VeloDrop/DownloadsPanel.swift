@@ -6,9 +6,13 @@ import VeloCore
 private let accent = Color(red: 0.21, green: 0.39, blue: 0.93)
 
 struct DownloadsPanel: View {
-    let model: DownloadModel
+    @Bindable var model: DownloadModel
     var inWindow = false
     let openPreferences: () -> Void
+    let openDownloads: () -> Void
+    @State private var search = ""
+    @State private var details: Transfer?
+    @State private var confirmClear = false
     @State private var showLink = false
     @State private var link = ""
     @State private var formError: String?
@@ -18,11 +22,17 @@ struct DownloadsPanel: View {
     private enum Scope: String, CaseIterable { case all = "All", current = "In progress", history = "Finished" }
 
     private var visible: [Transfer] {
-        switch scope {
-        case .all: return model.transfers
-        case .current: return model.transfers.filter { !$0.state.terminal }
-        case .history: return model.transfers.filter { $0.state.terminal }
+        model.transfers.filter { item in
+            if scope == .current && item.state.terminal { return false }
+            if scope == .history && !item.state.terminal { return false }
+            return search.isEmpty || item.displayName.localizedStandardContains(search)
+                || item.sourceURL?.host?.localizedStandardContains(search) == true
         }
+    }
+
+    private var confirmation: Binding<Transfer?> {
+        if inWindow { return $model.confirmation }
+        return .constant(nil)
     }
 
     var body: some View {
@@ -38,6 +48,12 @@ struct DownloadsPanel: View {
                     .padding(.bottom, 8)
             }
             if !model.transfers.isEmpty {
+                if inWindow {
+                    TextField("Search Downloads", text: $search)
+                        .textFieldStyle(.roundedBorder)
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, 8)
+                }
                 Picker("Downloads", selection: $scope) {
                     ForEach(Scope.allCases, id: \.self) { Text(LocalizedStringKey($0.rawValue)).tag($0) }
                 }
@@ -50,7 +66,13 @@ struct DownloadsPanel: View {
             else {
                 ScrollView {
                     LazyVStack(spacing: 7) {
-                        ForEach(visible) { TransferRow(transfer: $0, model: model) }
+                        ForEach(visible) { transfer in
+                            TransferRow(transfer: transfer, model: model, showDetails: { details = transfer },
+                                        confirmDownload: {
+                                            model.askToConfirm(transfer)
+                                            if !inWindow { openDownloads() }
+                                        })
+                        }
                     }
                     .padding(.horizontal, 12)
                     .padding(.bottom, 12)
@@ -61,8 +83,26 @@ struct DownloadsPanel: View {
             Divider()
             footer
         }
-        .frame(width: inWindow ? 408 : 382)
+        .frame(width: inWindow ? 538 : 400)
         .tint(accent)
+        .sheet(item: $details) { item in
+            TransferDetailsView(transfer: item, defaultDirectory: model.workspace.destination)
+        }
+        .sheet(item: confirmation, onDismiss: {
+            if inWindow { model.confirmNextIfNeeded() }
+        }) { item in
+            DownloadConfirmationView(transfer: item, model: model)
+        }
+        .alert("Clear Finished History?", isPresented: $confirmClear) {
+            Button("Clear History", role: .destructive) {
+                for transfer in model.transfers where transfer.state.terminal {
+                    model.removeHistory(transfer)
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Downloaded files will stay on disk.")
+        }
     }
 
     private var header: some View {
@@ -145,6 +185,7 @@ struct DownloadsPanel: View {
     }
 
     private var emptyTitle: LocalizedStringKey {
+        if !search.isEmpty { return "No matching downloads" }
         if model.transfers.isEmpty { return "No downloads yet" }
         return scope == .history ? "No finished downloads" : "No active downloads"
     }
@@ -167,6 +208,10 @@ struct DownloadsPanel: View {
             .accessibilityLabel("Settings")
             .foregroundStyle(.secondary)
             Menu {
+                if model.transfers.contains(where: { $0.state.terminal }) {
+                    Button("Clear Finished History…") { confirmClear = true }
+                    Divider()
+                }
                 Button("Quit VeloDrop") { NSApplication.shared.terminate(nil) }
                     .keyboardShortcut("q")
             } label: {
@@ -198,6 +243,9 @@ struct DownloadsPanel: View {
 private struct TransferRow: View {
     let transfer: Transfer
     let model: DownloadModel
+    let showDetails: () -> Void
+    let confirmDownload: () -> Void
+    @State private var confirmTrash = false
 
     var body: some View {
         HStack(spacing: 10) {
@@ -208,11 +256,14 @@ private struct TransferRow: View {
                 .background(.quaternary.opacity(0.6), in: RoundedRectangle(cornerRadius: 8))
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 5) {
-                Text(transfer.name)
-                    .font(.system(size: 12, weight: .semibold))
-                    .lineLimit(1).truncationMode(.middle)
-                    .help(transfer.name)
-                if !transfer.state.terminal {
+                Button(action: showDetails) {
+                    Text(transfer.displayName)
+                        .font(.system(size: 12, weight: .semibold))
+                        .lineLimit(1).truncationMode(.middle)
+                }
+                .buttonStyle(.plain)
+                .help(transfer.displayName)
+                if !transfer.state.terminal && transfer.state != .awaitingConfirmation {
                     ProgressView(value: transfer.fraction ?? 0)
                         .controlSize(.small)
                         .accessibilityLabel("Download progress")
@@ -222,23 +273,33 @@ private struct TransferRow: View {
                     .help(detail)
             }
             Spacer(minLength: 4)
-            if transfer.state.running {
+            if transfer.state == .awaitingConfirmation {
+                Button("Confirm…", action: confirmDownload)
+                    .controlSize(.small)
+            } else if transfer.state.running {
                 icon("pause.fill", "Pause") { model.pause(transfer) }
             } else if transfer.state == .paused || (transfer.state == .failed && transfer.url != nil) {
                 icon("play.fill", transfer.state == .paused ? "Resume" : "Retry") { model.resume(transfer) }
             } else if transfer.state == .completed {
                 icon("folder", "Show in Finder") { model.reveal(transfer) }
             }
+            if transfer.state.terminal {
+                icon("xmark.circle", "Remove from history") { model.removeHistory(transfer) }
+            }
             Menu {
+                Button("Download Details", action: showDetails)
                 if !transfer.state.terminal {
                     if transfer.fromBrowser {
                         Button("Continue in Edge") { model.useEdge(transfer) }
                     }
                     Button("Cancel download", role: .destructive) { model.cancel(transfer) }
                 } else {
-                    if transfer.state == .completed { Button("Show in Finder") { model.reveal(transfer) } }
+                    if transfer.state == .completed {
+                        Button("Open File") { model.openFile(transfer) }
+                        Button("Show in Finder") { model.reveal(transfer) }
+                        Button("Move File to Trash…", role: .destructive) { confirmTrash = true }
+                    }
                     Button("Remove from history") { model.removeHistory(transfer) }
-                        .disabled(transfer.fromBrowser && Date().timeIntervalSince(transfer.updatedAt) <= 120)
                 }
             } label: {
                 Image(systemName: "ellipsis")
@@ -251,6 +312,12 @@ private struct TransferRow: View {
         .padding(8)
         .frame(height: 66)
         .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 10))
+        .alert("Move Download to Trash?", isPresented: $confirmTrash) {
+            Button("Move to Trash", role: .destructive) { model.trash(transfer) }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(transfer.displayName)
+        }
     }
 
     private var symbol: String {
@@ -267,12 +334,16 @@ private struct TransferRow: View {
 
     private var detail: String {
         switch transfer.state {
+        case .awaitingConfirmation: return String(localized: "Waiting for confirmation")
         case .queued: return String(localized: "Waiting")
         case .downloading, .paused:
             let done = Format.bytes(transfer.received)
             let size = transfer.total > 0 ? String(localized: "\(done) of \(Format.bytes(transfer.total))") : done
             return transfer.state == .paused ? String(localized: "Paused · \(size)") : "\(size) · \(Format.rate(transfer.speed))"
-        case .completed: return String(localized: "Downloaded · \(Format.bytes(transfer.received))")
+        case .completed:
+            let size = String(localized: "Downloaded · \(Format.bytes(transfer.received))")
+            let date = (transfer.finishedAt ?? transfer.updatedAt).formatted(date: .abbreviated, time: .shortened)
+            return [size, transfer.sourceURL?.host, date].compactMap { $0 }.joined(separator: " · ")
         case .failed: return transfer.message ?? String(localized: "Download failed")
         case .canceled: return String(localized: "Canceled")
         }

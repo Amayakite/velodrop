@@ -47,10 +47,40 @@ func checkHandoffAndPublishKeepExistingFileAndQuarantine() throws {
     check(try Data(contentsOf: another) == Data("old".utf8))
     check(try Data(contentsOf: file) == Data("fresh".utf8))
     check(getxattr(file.path, "com.apple.quarantine", nil, 0, 0, 0) > 0)
-    check(workspace.recoveredOutput(item.id) == file)
+    check(workspace.recoveredOutput(item) == file)
     check(try workspace.publish(item) == file)
+}
+
+func checkBrowserHistoryAndRequestPrivacy() throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let workspace = Workspace(root: root.appendingPathComponent("state"),
+                              destination: root.appendingPathComponent("Downloads"))
+    try workspace.prepare()
+    let raw = URL(string: "https://example.com/report.zip?token=temporary#fragment")!
+    var transfer = try Transfer(url: raw, name: "report.zip", fromBrowser: true)
+    let headers = BrowserHeaders(["Cookie": "session=temporary", "Referer": "https://example.com/",
+                                  "Host": "other.example", "Accept-Language": "en\nAnother: value"])
+    check(headers.fields.count == 2)
+    check(headers.requiresSession)
+    check(transfer.sourceURL?.absoluteString == "https://example.com/report.zip")
+    try workspace.submit(transfer, headers: headers)
+    check(workspace.incoming().first?.2 == headers)
+    transfer.url = nil
+    transfer.state = .completed
+    transfer.destinationPath = root.appendingPathComponent("Chosen").path
+    try workspace.update(transfer)
+    check(workspace.directory(for: transfer).lastPathComponent == "Chosen")
+    let record = workspace.records.appendingPathComponent(transfer.id.uuidString + ".json")
+    check(try !String(contentsOf: record, encoding: .utf8).contains("temporary"))
+    try workspace.removeHistory(transfer)
+    check(workspace.read(transfer.id) == nil)
+    check(workspace.browserStatus(transfer.id)?.state == .completed)
+    workspace.acknowledge(transfer.id)
+    check(workspace.browserStatus(transfer.id) == nil)
 }
 
 try checkBrowserInputCannotSetDestinationOrCredentials()
 try checkHandoffAndPublishKeepExistingFileAndQuarantine()
+try checkBrowserHistoryAndRequestPrivacy()
 print("Core checks passed.")

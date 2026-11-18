@@ -1,10 +1,41 @@
 {
-  "extensionDescription": { "message": "将 Edge 中的普通文件下载交给 macOS 上的 VeloDrop。" },
-  "checkingConnection": { "message": "正在检查连接…" },
-  "connected": { "message": "已连接到 VeloDrop" },
-  "notConnected": { "message": "请在 VeloDrop 设置中配置 Edge" },
-  "autoTakeover": { "message": "自动接管下载" },
-  "minimumSize": { "message": "最小文件大小" },
-  "excludedHosts": { "message": "由 Edge 下载的网站" },
-  "settingsHint": { "message": "每行一个域名。最小文件大小设为 0 时，也会接管小文件。" }
+  "extensionDescription": {
+    "message": "将 Edge 中的普通文件下载交给 macOS 上的 VeloDrop。"
+  },
+  "checkingConnection": {
+    "message": "正在检查连接…"
+  },
+  "connected": {
+    "message": "已连接到 VeloDrop"
+  },
+  "notConnected": {
+    "message": "请在 VeloDrop 设置中配置 Edge"
+  },
+  "autoTakeover": {
+    "message": "自动接管下载"
+  },
+  "minimumSize": {
+    "message": "最小文件大小"
+  },
+  "excludedHosts": {
+    "message": "由 Edge 下载的网站"
+  },
+  "settingsHint": {
+    "message": "每行一个域名。最小文件大小设为 0 时，也会接管小文件。"
+  },
+  "browserNetwork": {
+    "message": "沿用 Edge 请求头和代理"
+  },
+  "browserNetworkHint": {
+    "message": "需允许站点和代理权限。会话请求头仅用于接管的下载任务。"
+  },
+  "useEdgeForSite": {
+    "message": "当前站点交给 Edge 下载"
+  },
+  "edgeSettings": {
+    "message": "打开 Edge 下载设置"
+  },
+  "edgeSettingsHint": {
+    "message": "关闭「下载开始时显示下载菜单」即可阻止 Edge 自动弹出下载面板。"
+  }
 }

@@ -1,10 +1,41 @@
 {
-  "extensionDescription": { "message": "Send ordinary Edge file downloads to VeloDrop for macOS." },
-  "checkingConnection": { "message": "Checking connection…" },
-  "connected": { "message": "Connected to your Mac" },
-  "notConnected": { "message": "Set up Edge in VeloDrop Settings" },
-  "autoTakeover": { "message": "Automatically take over downloads" },
-  "minimumSize": { "message": "Minimum file size" },
-  "excludedHosts": { "message": "Keep these sites in Edge" },
-  "settingsHint": { "message": "One domain per line. Set the minimum to zero to include small files." }
+  "extensionDescription": {
+    "message": "Send ordinary Edge file downloads to VeloDrop for macOS."
+  },
+  "checkingConnection": {
+    "message": "Checking connection…"
+  },
+  "connected": {
+    "message": "Connected to your Mac"
+  },
+  "notConnected": {
+    "message": "Set up Edge in VeloDrop Settings"
+  },
+  "autoTakeover": {
+    "message": "Automatically take over downloads"
+  },
+  "minimumSize": {
+    "message": "Minimum file size"
+  },
+  "excludedHosts": {
+    "message": "Keep these sites in Edge"
+  },
+  "settingsHint": {
+    "message": "One domain per line. Set the minimum to zero to include small files."
+  },
+  "browserNetwork": {
+    "message": "Use Edge request headers and proxy"
+  },
+  "browserNetworkHint": {
+    "message": "Requires site access and proxy permission. Session headers are used only for the captured download."
+  },
+  "useEdgeForSite": {
+    "message": "Keep the current site in Edge"
+  },
+  "edgeSettings": {
+    "message": "Open Edge’s download settings"
+  },
+  "edgeSettingsHint": {
+    "message": "Turn off “Show downloads menu when a download starts” to keep the Edge flyout closed."
+  }
 }

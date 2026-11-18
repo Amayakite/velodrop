@@ -9,7 +9,7 @@ struct VeloDropApp: App {
 
     var body: some Scene {
         MenuBarExtra {
-            DownloadsPanel(model: model, openPreferences: lifecycle.openPreferences)
+            DownloadsPanel(model: model, openPreferences: lifecycle.openPreferences, openDownloads: lifecycle.openDownloads)
         } label: {
             HStack(spacing: 4) {
                 Image(systemName: model.activeCount > 0 ? "arrow.down.circle.fill" : "arrow.down.circle")
@@ -32,8 +32,13 @@ final class AppLifecycle: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var settingsWindow: NSWindow?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        guard ProcessInfo.processInfo.environment["VELODROP_BACKGROUND_LAUNCH"] != "1" else { return }
-        DispatchQueue.main.async { [weak self] in self?.openDownloads() }
+        let background = ProcessInfo.processInfo.environment["VELODROP_BACKGROUND_LAUNCH"] == "1"
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.model.onBrowserIntake = { [weak self] in self?.openDownloads() }
+            self.model.showPendingIntake()
+            if !background { self.openDownloads() }
+        }
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
@@ -53,17 +58,17 @@ final class AppLifecycle: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if settingsWindow == nil {
             settingsWindow = makeWindow(title: String(localized: "VeloDrop Settings")) {
                 PreferencesView(model: model)
-                    .frame(width: 460, height: 360)
+                    .frame(width: 480, height: 430)
             }
         }
         present(settingsWindow)
     }
 
-    private func openDownloads() {
+    func openDownloads() {
         if downloadsWindow == nil {
             downloadsWindow = makeWindow(title: "VeloDrop") {
-                DownloadsPanel(model: model, inWindow: true, openPreferences: openPreferences)
-                    .frame(height: 400)
+                DownloadsPanel(model: model, inWindow: true, openPreferences: openPreferences, openDownloads: openDownloads)
+                    .frame(height: 480)
             }
         }
         present(downloadsWindow)

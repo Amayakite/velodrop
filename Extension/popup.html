@@ -10,11 +10,16 @@
 </header>
 <main>
   <label class="switch"><span data-message="autoTakeover"></span><input id="enabled" type="checkbox"></label>
+  <label class="switch"><span data-message="browserNetwork"></span><input id="browser-network" type="checkbox"></label>
+  <p class="hint" data-message="browserNetworkHint"></p>
   <label for="minimum" data-message="minimumSize"></label>
   <div class="number"><input id="minimum" type="number" min="0" max="10240" step="1"><span>MiB</span></div>
   <label for="hosts" data-message="excludedHosts"></label>
   <textarea id="hosts" rows="2" placeholder="example.com" spellcheck="false"></textarea>
   <p class="hint" data-message="settingsHint"></p>
+  <button id="add-site" type="button" data-message="useEdgeForSite" hidden></button>
+  <button id="edge-settings" type="button" data-message="edgeSettings"></button>
+  <p class="hint" data-message="edgeSettingsHint"></p>
 </main>
 <script type="module" src="popup.js"></script>
 </html>

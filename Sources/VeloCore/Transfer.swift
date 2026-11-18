@@ -1,7 +1,7 @@
 import Foundation
 
 public enum TransferState: String, Codable, Sendable {
-    case queued, downloading, paused, completed, failed, canceled
+    case awaitingConfirmation, queued, downloading, paused, completed, failed, canceled
 
     public var terminal: Bool { self == .completed || self == .failed || self == .canceled }
     public var running: Bool { self == .queued || self == .downloading }
@@ -22,6 +22,28 @@ public struct Transfer: Codable, Identifiable, Equatable, Sendable {
     public var connections: Int = 0
     public var finalPath: String?
     public var message: String?
+    public var sourceURL: URL?
+    public var referringPage: URL?
+    public var mimeType: String?
+    public var browserHeaderNames: [String]?
+    public var requiresBrowserSession: Bool?
+    public var browserProxy: BrowserProxy?
+    public var effectiveProxy: BrowserProxy?
+    public var destinationPath: String?
+    public var finishedAt: Date?
+
+    public var displayName: String {
+        finalPath.map { URL(fileURLWithPath: $0).lastPathComponent } ?? name
+    }
+
+    public static func displayURL(_ url: URL?) -> URL? {
+        guard let url, supports(url), var parts = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
+            return nil
+        }
+        parts.query = nil
+        parts.fragment = nil
+        return parts.url
+    }
 
     public init(id: UUID = UUID(), url: URL, name: String, fromBrowser: Bool,
                 expectedBytes: Int64? = nil) throws {
@@ -29,6 +51,7 @@ public struct Transfer: Codable, Identifiable, Equatable, Sendable {
         self.id = id
         self.url = url
         self.name = Self.safeName(name)
+        self.sourceURL = Self.displayURL(url)
         self.fromBrowser = fromBrowser
         self.expectedBytes = expectedBytes
         self.createdAt = Date()

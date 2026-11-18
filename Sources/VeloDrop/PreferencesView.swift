@@ -63,6 +63,8 @@ struct PreferencesView: View {
             }
 
             Section("Microsoft Edge") {
+                Toggle("Show window after takeover", isOn: $model.showWindowOnCapture)
+                Toggle("Confirm save location before download", isOn: $model.confirmBrowserDownloads)
                 Text("Set Up Edge opens the extensions page and copies the extension folder path.")
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -76,7 +78,11 @@ struct PreferencesView: View {
                         NSWorkspace.shared.activateFileViewerSelecting([extensionFolder])
                     }
                 }
-                Button("Disconnect", action: disconnect)
+                HStack {
+                    Button("Open Edge Download Settings") { openEdge("edge://settings/downloads") }
+                    Spacer()
+                    Button("Disconnect", action: disconnect)
+                }
                 if let message {
                     Label(message, systemImage: error ? "exclamationmark.circle" : "checkmark.circle")
                         .foregroundStyle(error ? .orange : .secondary)
@@ -92,14 +98,18 @@ struct PreferencesView: View {
         do {
             try EdgeRegistration(bundle: Bundle.main.bundleURL).install()
             copyPath()
-            if let edge = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.microsoft.edgemac"),
-               let url = URL(string: "edge://extensions/") {
-                NSWorkspace.shared.open([url], withApplicationAt: edge, configuration: NSWorkspace.OpenConfiguration(),
-                                        completionHandler: nil)
-            }
+            openEdge("edge://extensions/")
         } catch {
             message = error.localizedDescription
             self.error = true
+        }
+    }
+
+    private func openEdge(_ address: String) {
+        if let edge = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.microsoft.edgemac"),
+           let url = URL(string: address) {
+            NSWorkspace.shared.open([url], withApplicationAt: edge, configuration: NSWorkspace.OpenConfiguration(),
+                                    completionHandler: nil)
         }
     }
 

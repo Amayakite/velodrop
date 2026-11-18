@@ -45,6 +45,8 @@ final class AriaEngine {
         configuration.timeoutIntervalForResource = 3
         configuration.urlCache = nil
         configuration.httpShouldSetCookies = false
+        configuration.connectionProxyDictionary = ["HTTPEnable": 0, "HTTPSEnable": 0, "SOCKSEnable": 0,
+                                                   "ProxyAutoConfigEnable": 0, "ProxyAutoDiscoveryEnable": 0]
         self.session = URLSession(configuration: configuration)
     }
 
@@ -88,13 +90,15 @@ final class AriaEngine {
         attached.removeAll()
     }
 
-    func add(_ transfer: Transfer, stage: URL, connections: Int) async throws {
+    func add(_ transfer: Transfer, stage: URL, connections: Int, headers: BrowserHeaders?) async throws {
         guard let url = transfer.url, Transfer.supports(url) else { throw TransferError.invalidURL }
         if attached.contains(transfer.id) {
             let _: String = try await call("aria2.unpause", [gid(transfer.id)])
         } else {
             try FileManager.default.createDirectory(at: stage, withIntermediateDirectories: true)
-            let _: String = try await call("aria2.addUri", [[url.absoluteString], [
+            let proxy = transfer.effectiveProxy ?? .direct
+            let address = proxy.endpoint?.absoluteString ?? ""
+            var options: [String: Any] = [
                 "gid": gid(transfer.id), "dir": stage.path, "out": "payload",
                 "split": String(connections), "max-connection-per-server": String(connections),
                 "min-split-size": "4M", "file-allocation": "none",
@@ -102,7 +106,13 @@ final class AriaEngine {
                 "auto-file-renaming": "false", "allow-overwrite": "false",
                 "check-certificate": "true", "http-accept-gzip": "false",
                 "max-tries": "3", "retry-wait": "2", "connect-timeout": "8", "timeout": "15",
-            ]])
+                "http-proxy": address, "https-proxy": address, "all-proxy": address, "no-proxy": "",
+            ]
+            if let fields = headers?.fields, !fields.isEmpty {
+                options["header"] = ["X-VeloDrop-Request-URL: " + url.absoluteString]
+                    + fields.sorted(by: { $0.key < $1.key }).map { "\($0.key): \($0.value)" }
+            }
+            let _: String = try await call("aria2.addUri", [[url.absoluteString], options])
             attached.insert(transfer.id)
         }
     }

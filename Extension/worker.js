@@ -1,3 +1,7 @@
+import { normalizedHost, observeBrowserRequests, requestContext } from "./network.js";
+
+observeBrowserRequests();
+
 const host = "com.amayakite.velodrop";
 const alarm = "velodrop-watch";
 const prefix = "transfer:";
@@ -19,8 +23,9 @@ function native(message, timeout = 2400) {
 function safeURL(value) {
   try {
     const url = new URL(value);
-    return ["http:", "https:"].includes(url.protocol) && !url.username && !url.password
-      ? url : null;
+    if (!["http:", "https:"].includes(url.protocol) || url.username || url.password) return null;
+    url.hash = "";
+    return url;
   } catch {
     return null;
   }
@@ -33,8 +38,9 @@ function eligible(item, settings) {
   const url = safeURL(item.finalUrl || item.url);
   if (!url || !safeURL(item.url)) return null;
   if (settings.minimumMiB > 0 && item.totalBytes < settings.minimumMiB * 1024 * 1024) return null;
-  const blocked = settings.excludedHosts.toLowerCase().split(/\s+/).filter(Boolean);
-  if (blocked.some(domain => url.hostname === domain || url.hostname.endsWith("." + domain))) return null;
+  const blocked = settings.excludedHosts.split(/[\s,;]+/).map(normalizedHost).filter(Boolean);
+  const hosts = [url.hostname, normalizedHost(item.url), normalizedHost(item.referrer ?? "")];
+  if (blocked.some(domain => hosts.some(host => host === domain || host.endsWith("." + domain)))) return null;
   return url;
 }
 
@@ -50,6 +56,8 @@ async function takeOver(browserId) {
     if (!item) return;
     const url = eligible(item, stored);
     if (!url) return;
+    const context = await requestContext(item, url);
+    if (!context) return;
 
     // Keep Edge in charge unless the registered desktop helper can answer.
     const ping = await native({ action: "ping" });
@@ -67,6 +75,11 @@ async function takeOver(browserId) {
       action: "submit",
       id: handoff.id,
       url: url.href,
+      source: item.url,
+      referrer: safeURL(item.referrer)?.href,
+      mimeType: item.mime,
+      headers: context.headers,
+      proxy: context.proxy,
       name: item.filename.split(/[\\/]/).pop(),
       size: Number.isSafeInteger(item.fileSize) && item.fileSize > 0
         ? item.fileSize
@@ -85,12 +98,19 @@ async function release(handoff, outcome) {
   if (outcome === "resume" || outcome === "abandon") {
     await native({ action: "abandon", id: handoff.id }).catch(() => {});
   }
-  const [item] = await chrome.downloads.search({ id: handoff.browserId });
+  let [item] = await chrome.downloads.search({ id: handoff.browserId });
   if (item?.state === "in_progress" && item.paused) {
     if (outcome === "resume") await chrome.downloads.resume(handoff.browserId);
-    if (outcome === "cancel") await chrome.downloads.cancel(handoff.browserId);
+    if (outcome === "cancel") {
+      await chrome.downloads.cancel(handoff.browserId);
+      [item] = await chrome.downloads.search({ id: handoff.browserId });
+    }
+  }
+  if (outcome === "cancel" && item?.state === "interrupted" && item.error === "USER_CANCELED") {
+    await chrome.downloads.erase({ id: handoff.browserId });
   }
   await chrome.storage.local.remove(prefix + handoff.browserId);
+  await native({ action: "acknowledge", id: handoff.id }).catch(() => {});
 }
 
 async function ensureAlarm() {
@@ -124,20 +144,22 @@ async function sweep() {
       if (starting.has(job.browserId)) continue;
       try {
         const [item] = await chrome.downloads.search({ id: job.browserId });
+        const state = returned.jobs?.[job.id];
         if (!item || item.state !== "in_progress" || !item.paused) {
-          await release(job, "abandon");
+          const committed = state?.state === "completed" || state?.state === "canceled";
+          await release(job, committed ? "cancel" : "abandon");
           continue;
         }
         if (item.danger !== "safe") {
           await release(job, "resume");
           continue;
         }
-        const state = returned.jobs?.[job.id];
         if (state?.state === "completed" || state?.state === "canceled") {
           await release(job, "cancel");
         } else if (state?.state === "failed" || !returned.ok ||
             (!state && Date.now() - job.started > 8500) ||
-            (state && state.state !== "paused" && Date.now() - state.updatedAt > 14000)) {
+            (state?.state === "awaitingConfirmation" && returned.appRunning === false) ||
+            (state && !["paused", "awaitingConfirmation"].includes(state.state) && Date.now() - state.updatedAt > 14000)) {
           await release(job, "resume");
         }
       } catch {

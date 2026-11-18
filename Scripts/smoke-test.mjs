@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { spawn, execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { createServer } from "node:http";
+import { createServer, request as httpRequest } from "node:http";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -19,6 +19,7 @@ const smokeLocale = process.env.VELODROP_SMOKE_LOCALE;
 const appLog = [];
 const edgeLog = [];
 const calls = [];
+const proxied = [];
 let liveParallelRequests = 0;
 let peakParallelRequests = 0;
 const downloadSize = 28 * 1024 * 1024;
@@ -40,12 +41,28 @@ const fixture = createServer((request, response) => {
     return;
   }
 
-  const route = request.url.slice(1);
-  if (!["parallel.zip", "fallback.zip", "bridge-unavailable.zip", "restart.zip"].includes(route)) {
+  const route = new URL(request.url, "http://127.0.0.1").pathname.slice(1);
+  if (!["parallel.zip", "fallback.zip", "bridge-unavailable.zip", "restart.zip",
+    "site-excluded.zip", "confirmed-cancel.zip", "confirmed-save.zip",
+    "authenticated.zip", "captured-headers.zip", "redirect.zip", "redirect-target.zip"].includes(route)) {
     response.writeHead(404).end();
     return;
   }
-  const browser = !request.headers["user-agent"]?.includes("aria2");
+  const browser = !request.headers["want-digest"];
+  const hasSession = request.headers.cookie === "vd_fixture=allowed";
+  if (["authenticated.zip", "captured-headers.zip"].includes(route) && !hasSession) {
+    response.writeHead(403).end();
+    return;
+  }
+  if (route === "redirect.zip") {
+    response.writeHead(hasSession ? 302 : 403, { Location: "/redirect-target.zip" }).end();
+    return;
+  }
+  if (route === "redirect-target.zip" && (request.headers.cookie || request.headers.authorization ||
+      request.headers["x-velodrop-request-url"])) {
+    response.writeHead(403).end();
+    return;
+  }
   const match = /^bytes=(\d+)-(\d*)$/.exec(request.headers.range ?? "");
   calls.push({ route, browser, range: request.headers.range, since: Date.now() });
   if (route === "parallel.zip" && !browser) {
@@ -83,6 +100,22 @@ const fixture = createServer((request, response) => {
     }
   }, route === "restart.zip" ? 65 : 24);
   response.on("close", () => clearInterval(timer));
+});
+
+const proxy = createServer((incoming, outgoing) => {
+  const url = URL.parse(incoming.url);
+  if (url?.hostname !== "127.0.0.1" || Number(url.port) !== fixture.address().port) {
+    outgoing.writeHead(403).end();
+    return;
+  }
+  proxied.push(url.pathname);
+  const forward = httpRequest(url, { method: incoming.method, headers: incoming.headers }, response => {
+    outgoing.writeHead(response.statusCode, response.headers);
+    response.pipe(outgoing);
+  });
+  forward.on("error", () => outgoing.destroy());
+  outgoing.on("close", () => forward.destroy());
+  incoming.pipe(forward);
 });
 
 function records() {
@@ -191,6 +224,7 @@ try {
   assert.ok(existsSync(edge), "Microsoft Edge is required for the browser smoke test.");
   assert.ok(existsSync(app), "Run Scripts/package.sh before testing.");
   await new Promise(resolve => fixture.listen(0, "127.0.0.1", resolve));
+  await new Promise(resolve => proxy.listen(0, "127.0.0.1", resolve));
   const base = "http://127.0.0.1:" + fixture.address().port;
   const extension = join(app, "Contents/Resources/EdgeExtension");
   const manifest = JSON.parse(readFileSync(join(extension, "manifest.json")));
@@ -264,7 +298,7 @@ try {
   await waitFor("segmented download", () => new Set(calls.filter(
     call => call.route === "parallel.zip" && !call.browser && call.range).map(call => call.range)).size >= 2);
   await waitFor("downloaded file", () => records().some(item => item.name === "parallel.zip" && item.state === "completed"));
-  await waitFor("Edge cancellation after save", async () => (await browserState("parallel.zip"))?.state === "interrupted");
+  await waitFor("successful takeover removed from Edge", async () => !(await browserState("parallel.zip")));
   assert.ok(peakParallelRequests >= 2, "Segment requests overlap in time.");
   assert.equal(sha256(join(nativeDownloads, "parallel.zip")), digest);
   assert.equal(existsSync(join(edgeDownloads, "parallel.zip")), false);
@@ -277,6 +311,51 @@ try {
   assert.equal(existsSync(join(nativeDownloads, "fallback.zip")), false);
   assert.ok(records().some(item => item.name === "fallback.zip" && item.state === "failed"));
   console.log("After the server rejected aria2, Edge resumed the same download and saved identical bytes.");
+
+  const networkGranted = await cdp.run(popup, `chrome.permissions.contains({
+    permissions: ["proxy"], origins: ["http://*/*", "https://*/*"]
+  })`);
+  if (networkGranted) {
+    await cdp.run(page, 'document.cookie = "vd_fixture=allowed; Path=/"');
+    await start("captured-headers.zip");
+    const captured = await waitFor("browser request forwarded to VeloDrop", () => records()
+      .find(item => item.name === "captured-headers.zip" && item.state === "completed"));
+    assert.ok(captured.browserHeaderNames.includes("Cookie"));
+    assert.equal(JSON.stringify(captured).includes("vd_fixture"), false);
+    assert.equal(sha256(join(nativeDownloads, "captured-headers.zip")), digest);
+    console.log("Edge request capture forwarded the test session cookie to the original URL.");
+  }
+
+  const authenticatedID = crypto.randomUUID();
+  assert.equal(nativeMessage({
+    action: "submit", id: authenticatedID, name: "authenticated.zip", size: downloadSize,
+    url: base + "/authenticated.zip", source: base + "/authenticated.zip?token=discard",
+    headers: { Cookie: "vd_fixture=allowed" },
+    proxy: { mode: "fixed", endpoint: "http://127.0.0.1:" + proxy.address().port },
+  }).ok, true);
+  const authenticated = await waitFor("scoped browser header with an HTTP proxy", () => records()
+    .find(item => item.name === "authenticated.zip" && item.state === "completed"));
+  assert.ok(proxied.includes("/authenticated.zip"));
+  assert.equal(sha256(join(nativeDownloads, "authenticated.zip")), digest);
+  assert.equal(authenticated.sourceURL, base + "/authenticated.zip");
+  assert.deepEqual(authenticated.browserHeaderNames, ["Cookie"]);
+  assert.equal(JSON.stringify(authenticated).includes("vd_fixture"), false);
+
+  assert.equal(nativeMessage({
+    action: "submit", id: crypto.randomUUID(), name: "redirect.zip", size: downloadSize,
+    url: base + "/redirect.zip", headers: { Cookie: "vd_fixture=allowed", Authorization: "Bearer fixture" },
+  }).ok, true);
+  await waitFor("redirect without browser credentials", () => records()
+    .some(item => item.name === "redirect.zip" && item.state === "completed"));
+  assert.equal(sha256(join(nativeDownloads, "redirect.zip")), digest);
+  console.log("Scoped browser headers and HTTP proxy worked, and a redirected request received neither credential.");
+
+  await cdp.run(popup, "chrome.storage.local.set({ excludedHosts: '127.0.0.1' })");
+  await start("site-excluded.zip");
+  await waitFor("excluded site left in Edge", async () => (await browserState("site-excluded.zip"))?.state === "complete");
+  assert.equal(records().some(item => item.name === "site-excluded.zip"), false);
+  await cdp.run(popup, "chrome.storage.local.set({ excludedHosts: '' })");
+  console.log("The excluded site downloaded in Edge without a VeloDrop entry.");
 
   const restartID = crypto.randomUUID();
   assert.equal(nativeMessage({
@@ -328,5 +407,7 @@ try {
   if (activeLaunch && runningDesktop() === activeLaunch) process.kill(activeLaunch, "SIGTERM");
   fixture.closeAllConnections();
   fixture.close();
+  proxy.closeAllConnections();
+  proxy.close();
   rmSync(here, { recursive: true, force: true });
 }

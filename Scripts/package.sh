@@ -33,7 +33,7 @@ cp -R Extension/. "$resources/EdgeExtension/"
 cp "$assets"/Icon*.png "$resources/EdgeExtension/"
 cp "$engine/aria2-1.37.0/COPYING" "$resources/Notices/aria2-COPYING.txt"
 cp "$engine/aria2-1.37.0/LICENSE.OpenSSL" "$resources/Notices/aria2-LICENSE.OpenSSL.txt"
-cp Scripts/build-engine.sh "$resources/Notices/"
+cp Scripts/build-engine.sh Scripts/aria2-scoped-headers.patch "$resources/Notices/"
 cp "$engine/aria2-1.37.0.tar.xz" "$resources/Notices/"
 cat > "$contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -49,7 +49,7 @@ cat > "$contents/Info.plist" <<PLIST
     <key>CFBundleIconFile</key><string>AppIcon</string>
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>CFBundleShortVersionString</key><string>$version</string>
-    <key>CFBundleVersion</key><string>4</string>
+    <key>CFBundleVersion</key><string>5</string>
     <key>LSMinimumSystemVersion</key><string>14.0</string>
     <key>LSUIElement</key><true/>
     <key>NSHighResolutionCapable</key><true/>
