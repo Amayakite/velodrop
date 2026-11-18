@@ -1,0 +1,13 @@
+{
+  "manifest_version": 3,
+  "name": "VeloDrop",
+  "description": "Send ordinary Edge file downloads to VeloDrop for macOS.",
+  "version": "0.1.0",
+  "minimum_chrome_version": "120",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA0+EPLNHt67RFjk+ReMxq7UD0aVJqQLGTsl6KmXm2bc8Lq/18DabjmFLr81HKsJuQxTkwaR4jZaMVJvQfMJIvsvVt+2DfOY1T2P/KR5dAlenLHRpIrtcr/x80AloywH1WumEIyhCVeM06tWnU5ecLrfU8G1LLlLckY1j/XRypPBZczre6Yq99LY3761E5x7n1JYh/32oLaHaAetdTQgDVAh1s4tDW721M2Gt5CS+U87owcXEm1AcNb6PJm6lBHagfXA5cxsmKYVrZpJymWdg9ChuCu72jaO1yEAxN/xVN3BHmFDpLexJYIA/TNDlqcvUIsuoQLJHAm6wDaHWgvLSuDwIDAQAB",
+  "incognito": "not_allowed",
+  "permissions": ["downloads", "nativeMessaging", "storage", "alarms"],
+  "background": { "service_worker": "worker.js", "type": "module" },
+  "action": { "default_popup": "popup.html" },
+  "icons": { "16": "Icon16.png", "32": "Icon32.png", "48": "Icon48.png", "128": "Icon128.png" }
+}

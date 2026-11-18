@@ -1,0 +1,83 @@
+import Foundation
+
+public enum TransferState: String, Codable, Sendable {
+    case queued, downloading, paused, completed, failed, canceled
+
+    public var terminal: Bool { self == .completed || self == .failed || self == .canceled }
+    public var running: Bool { self == .queued || self == .downloading }
+}
+
+public struct Transfer: Codable, Identifiable, Equatable, Sendable {
+    public let id: UUID
+    public var url: URL?
+    public let name: String
+    public let fromBrowser: Bool
+    public let expectedBytes: Int64?
+    public let createdAt: Date
+    public var updatedAt: Date
+    public var state: TransferState
+    public var received: Int64 = 0
+    public var total: Int64 = 0
+    public var speed: Int64 = 0
+    public var connections: Int = 0
+    public var finalPath: String?
+    public var message: String?
+
+    public init(id: UUID = UUID(), url: URL, name: String, fromBrowser: Bool,
+                expectedBytes: Int64? = nil) throws {
+        guard Self.supports(url) else { throw TransferError.invalidURL }
+        self.id = id
+        self.url = url
+        self.name = Self.safeName(name)
+        self.fromBrowser = fromBrowser
+        self.expectedBytes = expectedBytes
+        self.createdAt = Date()
+        self.updatedAt = createdAt
+        self.state = .queued
+        self.total = expectedBytes ?? 0
+    }
+
+    public var fraction: Double? {
+        guard total > 0 else { return nil }
+        return min(Double(received) / Double(total), 1)
+    }
+
+    public static func supports(_ url: URL) -> Bool {
+        guard let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https" else {
+            return false
+        }
+        return !(url.host?.isEmpty ?? true) && url.user == nil && url.password == nil
+            && url.absoluteString.utf8.count <= 8192
+    }
+
+    public static func safeName(_ input: String) -> String {
+        let components = input.split(whereSeparator: { $0 == "/" || $0 == "\\" })
+        let name = components.last.map(String.init) ?? ""
+        let visible = name.unicodeScalars.filter { !CharacterSet.controlCharacters.contains($0) }
+        let trimmed = String(String.UnicodeScalarView(visible))
+            .trimmingCharacters(in: .whitespacesAndNewlines.union(CharacterSet(charactersIn: ".")))
+        var output = ""
+        for character in trimmed {
+            guard output.utf8.count + String(character).utf8.count <= 200 else { break }
+            output.append(character)
+        }
+        return output.isEmpty ? "Download" : output
+    }
+}
+
+public enum TransferError: LocalizedError {
+    case invalidURL, engineUnavailable, invalidResponse, missingFile, unexpectedSize, busy
+    case engine(String)
+
+    public var errorDescription: String? {
+        switch self {
+        case .invalidURL: return String(localized: "Enter a valid HTTP or HTTPS link.")
+        case .engineUnavailable: return String(localized: "The download engine could not start.")
+        case .invalidResponse: return String(localized: "The download engine returned an invalid response.")
+        case .missingFile: return String(localized: "The download engine did not produce a file.")
+        case .unexpectedSize: return String(localized: "The server returned a different file size.")
+        case .busy: return String(localized: "A download with that ID is already queued.")
+        case .engine(let message): return message
+        }
+    }
+}

@@ -1,0 +1,14 @@
+:root { color-scheme: light dark; font: 13px system-ui; accent-color: #4d72f6; }
+body { width: 278px; margin: 0; padding: 15px; }
+header { display: flex; gap: 11px; align-items: center; margin-bottom: 12px; }
+h1 { font-size: 16px; margin: 0; }
+p { margin: 3px 0 0; }
+main { display: grid; gap: 7px; }
+.switch { display: flex; align-items: center; justify-content: space-between; padding: 9px 0; border-block: 1px solid color-mix(in srgb, currentColor 18%, transparent); margin-bottom: 4px; }
+label { font-weight: 500; }
+textarea, input[type=number] { box-sizing: border-box; border: 1px solid color-mix(in srgb, currentColor 24%, transparent); border-radius: 6px; padding: 5px 8px; font: inherit; }
+input[type=number] { width: 76px; }
+.number { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+textarea { resize: vertical; }
+.hint, #status { color: color-mix(in srgb, currentColor 70%, transparent); font-size: 11px; }
+#status[data-connected=true] { color: light-dark(#147246, #75d7a3); }
