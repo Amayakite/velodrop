@@ -36,8 +36,6 @@ siteButton.addEventListener("click", async () => {
   await chrome.storage.local.set({ excludedHosts: hosts.value });
   siteButton.disabled = true;
 });
-document.querySelector("#edge-settings").addEventListener("click", () =>
-  chrome.tabs.create({ url: "edge://settings/downloads" }));
 
 minimum.addEventListener("change", () => {
   if (minimum.checkValidity() && minimum.value !== "") {

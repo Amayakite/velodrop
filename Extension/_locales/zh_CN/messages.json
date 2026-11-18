@@ -24,18 +24,12 @@
     "message": "每行一个域名。最小文件大小设为 0 时，也会接管小文件。"
   },
   "browserNetwork": {
-    "message": "沿用 Edge 请求头和代理"
+    "message": "沿用 Edge 会话请求头"
   },
   "browserNetworkHint": {
-    "message": "需允许站点和代理权限。会话请求头仅用于接管的下载任务。"
+    "message": "开启后需要站点权限。会话请求头仅用于本次下载。"
   },
   "useEdgeForSite": {
     "message": "当前站点交给 Edge 下载"
-  },
-  "edgeSettings": {
-    "message": "打开 Edge 下载设置"
-  },
-  "edgeSettingsHint": {
-    "message": "关闭「下载开始时显示下载菜单」即可阻止 Edge 自动弹出下载面板。"
   }
 }

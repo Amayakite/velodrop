@@ -32,7 +32,7 @@ private func handle(_ data: Data, bundle: URL) throws -> Reply {
         let engine = BundleLayout.engine(in: bundle)
         return Reply(ok: FileManager.default.isExecutableFile(atPath: engine.path))
 
-    case "submit":
+    case "submit", "reserve":
         guard let id = request.id, let url = request.url, let name = request.name,
               !workspace.wasAbandoned(id) else { return Reply(ok: false) }
         var transfer = try Transfer(id: id, url: url, name: name, fromBrowser: true,
@@ -51,7 +51,22 @@ private func handle(_ data: Data, bundle: URL) throws -> Reply {
         } else {
             transfer.browserProxy = request.proxy?.mode == .direct ? .direct : .system
         }
+        if request.action == "reserve" {
+            workspace.expireReservations()
+            try workspace.submit(transfer, headers: headers, reserve: true)
+            return Reply(ok: true)
+        }
         try workspace.submit(transfer, headers: headers)
+        do { try launch(bundle) }
+        catch {
+            try? workspace.abandon(id)
+            return Reply(ok: false)
+        }
+        return Reply(ok: true)
+
+    case "activate":
+        guard let id = request.id else { return Reply(ok: false) }
+        try workspace.activate(id)
         do { try launch(bundle) }
         catch {
             try? workspace.abandon(id)
@@ -113,18 +128,20 @@ private func exactly(_ length: Int) throws -> Data {
     return bytes
 }
 
-private func processMessage() throws {
-    let lengthBytes = try exactly(4)
-    let length = lengthBytes.enumerated().reduce(0) { $0 | (Int($1.element) << ($1.offset * 8)) }
-    guard (1...256_000).contains(length) else { throw TransferError.invalidResponse }
+private func processMessages() throws {
     let bundle = URL(fileURLWithPath: CommandLine.arguments[0]).resolvingSymlinksInPath()
         .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-    let request = try exactly(length)
-    let reply = (try? handle(request, bundle: bundle)) ?? Reply(ok: false)
-    let data = try JSONEncoder().encode(reply)
-    let prefix = Data((0..<4).map { UInt8(truncatingIfNeeded: data.count >> ($0 * 8)) })
-    try FileHandle.standardOutput.write(contentsOf: prefix + data)
+    while let prefix = try FileHandle.standardInput.read(upToCount: 4), !prefix.isEmpty {
+        let lengthBytes = prefix + (prefix.count < 4 ? try exactly(4 - prefix.count) : Data())
+        let length = lengthBytes.enumerated().reduce(0) { $0 | (Int($1.element) << ($1.offset * 8)) }
+        guard (1...256_000).contains(length) else { throw TransferError.invalidResponse }
+        let request = try exactly(length)
+        let reply = (try? handle(request, bundle: bundle)) ?? Reply(ok: false)
+        let data = try JSONEncoder().encode(reply)
+        let prefix = Data((0..<4).map { UInt8(truncatingIfNeeded: data.count >> ($0 * 8)) })
+        try FileHandle.standardOutput.write(contentsOf: prefix + data)
+    }
 }
 
-do { try processMessage() }
+do { try processMessages() }
 catch { exit(1) }

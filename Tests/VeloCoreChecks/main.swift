@@ -27,7 +27,16 @@ func checkHandoffAndPublishKeepExistingFileAndQuarantine() throws {
     try workspace.prepare()
     let item = try Transfer(url: URL(string: "https://example.com/report.pdf")!,
                             name: "report.pdf", fromBrowser: true, expectedBytes: 5)
-    try workspace.submit(item)
+    try workspace.submit(item, reserve: true)
+    check(workspace.incoming().isEmpty)
+    try workspace.activate(item.id)
+    try workspace.activate(item.id)
+    check(workspace.incoming().map(\.1) == [item])
+    let declined = try Transfer(url: URL(string: "https://example.com/other.pdf")!,
+                                name: "other.pdf", fromBrowser: true)
+    try workspace.submit(declined, reserve: true)
+    try workspace.abandon(declined.id)
+    checkThrows { try workspace.activate(declined.id) }
     check(workspace.incoming().map(\.1) == [item])
     try workspace.update(item)
     check(workspace.read(item.id) == item)

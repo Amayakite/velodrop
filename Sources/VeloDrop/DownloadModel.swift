@@ -311,7 +311,8 @@ final class DownloadModel {
                     save(item, refreshUI: false)
                 }
             }
-            try? await Task.sleep(for: .milliseconds(850))
+            let hasNewTransfer = transfers.contains { $0.state == .queued }
+            try? await Task.sleep(for: .milliseconds(hasNewTransfer ? 180 : 850))
         }
     }
 

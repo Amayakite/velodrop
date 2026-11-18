@@ -24,18 +24,12 @@
     "message": "One domain per line. Set the minimum to zero to include small files."
   },
   "browserNetwork": {
-    "message": "Use Edge request headers and proxy"
+    "message": "Reuse Edge session headers"
   },
   "browserNetworkHint": {
-    "message": "Requires site access and proxy permission. Session headers are used only for the captured download."
+    "message": "This requires site access. Session headers are only used for the current download."
   },
   "useEdgeForSite": {
     "message": "Keep the current site in Edge"
-  },
-  "edgeSettings": {
-    "message": "Open Edge’s download settings"
-  },
-  "edgeSettingsHint": {
-    "message": "Turn off “Show downloads menu when a download starts” to keep the Edge flyout closed."
   }
 }

@@ -1,5 +1,4 @@
 export const networkPermissions = {
-  permissions: ["proxy"],
   origins: ["http://*/*", "https://*/*"],
 };
 
@@ -65,7 +64,7 @@ function matchesBypass(url, entry) {
 }
 
 async function browserProxy(url) {
-  if (!(await chrome.permissions.contains({ permissions: ["proxy"] }))) return { mode: "system" };
+  if (!chrome.proxy?.settings) return { mode: "system" };
   const { value } = await chrome.proxy.settings.get({ incognito: false });
   if (value.mode === "system" || value.mode === "direct") return { mode: value.mode };
   if (value.mode !== "fixed_servers") return null;
@@ -108,7 +107,7 @@ export async function requestContext(item, url) {
       }
     }
   }
-  return { headers, proxy };
+  return { headers, proxy, method: initial?.method };
 }
 
 export function normalizedHost(input) {

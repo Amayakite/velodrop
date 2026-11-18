@@ -42,7 +42,7 @@ const fixture = createServer((request, response) => {
   }
 
   const route = new URL(request.url, "http://127.0.0.1").pathname.slice(1);
-  if (!["parallel.zip", "fallback.zip", "bridge-unavailable.zip", "restart.zip",
+  if (!["parallel.zip", "fallback.zip", "signed.zip", "bridge-unavailable.zip", "restart.zip",
     "site-excluded.zip", "confirmed-cancel.zip", "confirmed-save.zip",
     "authenticated.zip", "captured-headers.zip", "redirect.zip", "redirect-target.zip"].includes(route)) {
     response.writeHead(404).end();
@@ -70,7 +70,7 @@ const fixture = createServer((request, response) => {
     peakParallelRequests = Math.max(peakParallelRequests, liveParallelRequests);
     response.once("close", () => { liveParallelRequests -= 1; });
   }
-  if (route === "fallback.zip" && !browser) {
+  if (["fallback.zip", "signed.zip"].includes(route) && !browser) {
     response.writeHead(403).end();
     return;
   }
@@ -199,8 +199,8 @@ class CDP {
     return sessionId;
   }
 
-  async run(session, expression) {
-    const reply = await this.send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }, session);
+  async run(session, expression, userGesture = false) {
+    const reply = await this.send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true, userGesture }, session);
     if (reply.exceptionDetails) throw new Error(reply.exceptionDetails.exception?.description ?? reply.exceptionDetails.text);
     return reply.result.value;
   }
@@ -246,6 +246,13 @@ try {
   assert.equal(runningDesktop(), null, "Quit the packaged test build before running this test.");
   assert.equal(nativeMessage({ action: "ping" }).ok, true);
 
+  const profileDefault = join(profile, "Default");
+  mkdirSync(profileDefault, { recursive: true });
+  writeFileSync(join(profileDefault, "Preferences"), JSON.stringify({
+    profile: { default_content_setting_values: { automatic_downloads: 1 } },
+    download: { default_directory: edgeDownloads, prompt_for_download: false, directory_upgrade: true },
+  }));
+
   browser = child(edge, [
     "--headless=new", "--no-first-run", "--no-default-browser-check", "--disable-background-networking",
     "--remote-debugging-pipe", "--enable-unsafe-extension-debugging", "--user-data-dir=" + profile,
@@ -261,7 +268,6 @@ try {
     console.log(String(error));
   }
   assert.ok(!loaded || loaded.id === id, "Native host matches the ID loaded by Edge.");
-  await cdp.send("Browser.setDownloadBehavior", { behavior: "allow", downloadPath: edgeDownloads });
   const page = await cdp.tab(base);
   const popup = await cdp.tab("chrome-extension://" + id + "/popup.html");
   await waitFor("Edge extension connection", async () =>
@@ -286,7 +292,7 @@ try {
   const start = route => cdp.run(page, `(() => {
     const link = document.createElement("a"); link.href = ${JSON.stringify(base + "/" + route)};
     document.body.appendChild(link); link.click(); link.remove(); return true;
-  })()`);
+  })()`, true);
   const browserState = route => cdp.run(popup, `chrome.downloads.search({}).then(
     items => items.find(item => item.url.endsWith(${JSON.stringify("/" + route)})))
   `);
@@ -294,7 +300,11 @@ try {
   requestedDesktopLaunch = true;
   await start("parallel.zip");
   launchedDesktop = await waitFor("Edge starting the desktop app", runningDesktop);
-  await waitFor("Edge held in reserve", async () => (await browserState("parallel.zip"))?.paused);
+  await waitFor("original Edge item removed before completion", async () =>
+    calls.some(call => call.route === "parallel.zip" && !call.browser) &&
+    !(await browserState("parallel.zip")) &&
+    !records().some(item => item.name === "parallel.zip" && item.state === "completed")
+  );
   await waitFor("segmented download", () => new Set(calls.filter(
     call => call.route === "parallel.zip" && !call.browser && call.range).map(call => call.range)).size >= 2);
   await waitFor("downloaded file", () => records().some(item => item.name === "parallel.zip" && item.state === "completed"));
@@ -306,11 +316,24 @@ try {
 
   await start("fallback.zip");
   await waitFor("aria2 rejection", () => calls.some(call => call.route === "fallback.zip" && !call.browser));
-  await waitFor("Edge resumed the original request", async () => (await browserState("fallback.zip"))?.state === "complete");
+  await waitFor("Edge retried the original URL", async () => (await browserState("fallback.zip"))?.state === "complete");
   assert.equal(sha256(join(edgeDownloads, "fallback.zip")), digest);
   assert.equal(existsSync(join(nativeDownloads, "fallback.zip")), false);
   assert.ok(records().some(item => item.name === "fallback.zip" && item.state === "failed"));
-  console.log("After the server rejected aria2, Edge resumed the same download and saved identical bytes.");
+  assert.equal((await browserState("fallback.zip")).byExtensionId, id);
+  console.log("After the server rejected aria2, Edge retried the original URL and saved identical bytes.");
+
+  const signedRoute = "signed.zip?ticket=fixture";
+  await start(signedRoute);
+  const pausedOriginal = await waitFor("Edge paused the original signed download", async () => {
+    const item = await browserState(signedRoute);
+    return item?.paused ? item : null;
+  });
+  await waitFor("Edge resumed the original signed download", async () => {
+    const item = await browserState(signedRoute);
+    return item?.id === pausedOriginal.id && item.state === "complete";
+  });
+  assert.equal(sha256(join(edgeDownloads, "signed.zip")), digest);
 
   const networkGranted = await cdp.run(popup, `chrome.permissions.contains({
     permissions: ["proxy"], origins: ["http://*/*", "https://*/*"]

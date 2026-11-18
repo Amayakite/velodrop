@@ -22,6 +22,7 @@ public struct Workspace: Sendable {
     public var inbox: URL { root.appendingPathComponent("Inbox", isDirectory: true) }
     public var records: URL { root.appendingPathComponent("Transfers", isDirectory: true) }
     public var staging: URL { root.appendingPathComponent("Staging", isDirectory: true) }
+    private var reservations: URL { root.appendingPathComponent("Reservations", isDirectory: true) }
     private var outcomes: URL { root.appendingPathComponent("Outcomes", isDirectory: true) }
     public var abandons: URL { root.appendingPathComponent("Abandoned", isDirectory: true) }
 
@@ -41,18 +42,24 @@ public struct Workspace: Sendable {
     }
 
     public func prepare() throws {
-        for directory in [root, inbox, records, staging, abandons, outcomes] {
+        for directory in [root, inbox, records, staging, abandons, outcomes, reservations] {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true,
                                                     attributes: [.posixPermissions: 0o700])
         }
     }
 
-    public func submit(_ transfer: Transfer, headers: BrowserHeaders? = nil) throws {
-        if read(transfer.id) != nil || browserStatus(transfer.id) != nil { throw TransferError.busy }
-        let file = inboxURL(transfer.id)
+    public func submit(_ transfer: Transfer, headers: BrowserHeaders? = nil, reserve: Bool = false) throws {
+        if browserStatus(transfer.id) != nil { throw TransferError.busy }
+        let file = reserve ? reservationURL(transfer.id) : inboxURL(transfer.id)
         let data = try JSONEncoder().encode(Incoming(transfer: transfer, fields: headers?.fields ?? [:]))
         try data.write(to: file, options: .atomic)
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
+    }
+
+    public func activate(_ id: UUID) throws {
+        guard !wasAbandoned(id) else { throw TransferError.busy }
+        if read(id) != nil || FileManager.default.fileExists(atPath: inboxURL(id).path) { return }
+        try FileManager.default.moveItem(at: reservationURL(id), to: inboxURL(id))
     }
 
     public func update(_ transfer: Transfer) throws {
@@ -89,6 +96,16 @@ public struct Workspace: Sendable {
         }
     }
 
+    public func expireReservations() {
+        let cutoff = Date().addingTimeInterval(-60)
+        for file in files(in: reservations) {
+            if let date = try? file.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate,
+               date < cutoff {
+                try? FileManager.default.removeItem(at: file)
+            }
+        }
+    }
+
     public var appIsRunning: Bool {
         let descriptor = open(root.appendingPathComponent("app.lock").path, O_RDONLY)
         guard descriptor >= 0 else { return false }
@@ -117,6 +134,7 @@ public struct Workspace: Sendable {
     public func abandon(_ id: UUID) throws {
         try Data().write(to: abandons.appendingPathComponent(id.uuidString), options: .atomic)
         try? FileManager.default.removeItem(at: inboxURL(id))
+        try? FileManager.default.removeItem(at: reservationURL(id))
     }
 
     public func wasAbandoned(_ id: UUID) -> Bool {
@@ -193,6 +211,7 @@ public struct Workspace: Sendable {
                                                        options: .skipsHiddenFiles)) ?? []
     }
 
+    private func reservationURL(_ id: UUID) -> URL { reservations.appendingPathComponent(id.uuidString + ".json") }
     private func outcomeURL(_ id: UUID) -> URL { outcomes.appendingPathComponent(id.uuidString + ".json") }
     private func inboxURL(_ id: UUID) -> URL { inbox.appendingPathComponent(id.uuidString + ".json") }
     private func recordURL(_ id: UUID) -> URL { records.appendingPathComponent(id.uuidString + ".json") }
