@@ -52,7 +52,8 @@ final class AppLifecycle: NSObject, NSApplicationDelegate, NSWindowDelegate {
     func openPreferences() {
         if settingsWindow == nil {
             settingsWindow = makeWindow(title: String(localized: "VeloDrop Settings")) {
-                PreferencesView(model: model).frame(width: 460)
+                PreferencesView(model: model)
+                    .frame(width: 460, height: 360)
             }
         }
         present(settingsWindow)
