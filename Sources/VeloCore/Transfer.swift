@@ -20,6 +20,7 @@ public struct Transfer: Codable, Identifiable, Equatable, Sendable {
     public var total: Int64 = 0
     public var speed: Int64 = 0
     public var connections: Int = 0
+    public var connectionLimit: Int?
     public var finalPath: String?
     public var message: String?
     public var sourceURL: URL?

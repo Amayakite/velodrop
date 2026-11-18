@@ -30,14 +30,61 @@ final class AppLifecycle: NSObject, NSApplicationDelegate, NSWindowDelegate {
     let model = DownloadModel()
     private var downloadsWindow: NSWindow?
     private var settingsWindow: NSWindow?
+    private var confirmationWindow: NSWindow?
+    private var confirmingID: UUID?
+    private var progressWindows: [UUID: NSWindow] = [:]
+
+    func showConfirmation() {
+        if let window = confirmationWindow, confirmingID == model.confirmation?.id {
+            present(window)
+            return
+        }
+        confirmingID = model.confirmation?.id
+        confirmationWindow?.orderOut(nil)
+        confirmationWindow = nil
+        guard let item = model.confirmation else {
+            DispatchQueue.main.async { [weak self] in self?.model.confirmNextIfNeeded() }
+            return
+        }
+        confirmationWindow = makeWindow(title: String(localized: "Confirm Download")) {
+            DownloadConfirmationView(transfer: item, model: model)
+        }
+        present(confirmationWindow)
+    }
+
+    func openProgress(_ id: UUID) {
+        if progressWindows[id] == nil {
+            progressWindows[id] = makeWindow(title: String(localized: "Download Progress")) {
+                DownloadProgressView(id: id, model: model)
+            }
+        }
+        present(progressWindows[id])
+    }
+
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        if sender === confirmationWindow, let item = model.confirmation {
+            model.useEdge(item)
+            return false
+        }
+        return true
+    }
+
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let background = ProcessInfo.processInfo.environment["VELODROP_BACKGROUND_LAUNCH"] == "1"
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
-            self.model.onBrowserIntake = { [weak self] in self?.openDownloads() }
+            self.model.onConfirmationChanged = { [weak self] in self?.showConfirmation() }
+            self.model.onProgress = { [weak self] id in self?.openProgress(id) }
+            self.model.onBrowserIntake = { [weak self] in
+                guard let self else { return }
+                if self.model.confirmation != nil { self.showConfirmation() }
+                else { self.openDownloads() }
+            }
+            self.model.confirmNextIfNeeded()
+            if self.model.confirmation != nil { self.showConfirmation() }
             self.model.showPendingIntake()
-            if !background { self.openDownloads() }
+            if !background && self.model.confirmation == nil { self.openDownloads() }
         }
     }
 
@@ -50,6 +97,7 @@ final class AppLifecycle: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     func windowWillClose(_ notification: Notification) {
         guard let window = notification.object as? NSWindow else { return }
+        progressWindows = progressWindows.filter { $0.value !== window }
         if window === downloadsWindow { downloadsWindow = nil }
         if window === settingsWindow { settingsWindow = nil }
     }

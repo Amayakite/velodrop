@@ -11,8 +11,10 @@ struct DownloadsPanel: View {
     let openPreferences: () -> Void
     let openDownloads: () -> Void
     @State private var search = ""
-    @State private var details: Transfer?
     @State private var confirmClear = false
+    @State private var selected = Set<UUID>()
+    @State private var deleting = Set<UUID>()
+    @State private var showDelete = false
     @State private var showLink = false
     @State private var link = ""
     @State private var formError: String?
@@ -28,11 +30,6 @@ struct DownloadsPanel: View {
             return search.isEmpty || item.displayName.localizedStandardContains(search)
                 || item.sourceURL?.host?.localizedStandardContains(search) == true
         }
-    }
-
-    private var confirmation: Binding<Transfer?> {
-        if inWindow { return $model.confirmation }
-        return .constant(nil)
     }
 
     var body: some View {
@@ -67,11 +64,21 @@ struct DownloadsPanel: View {
                 ScrollView {
                     LazyVStack(spacing: 7) {
                         ForEach(visible) { transfer in
-                            TransferRow(transfer: transfer, model: model, showDetails: { details = transfer },
-                                        confirmDownload: {
-                                            model.askToConfirm(transfer)
-                                            if !inWindow { openDownloads() }
-                                        })
+                            HStack {
+                                if inWindow {
+                                    Toggle("Select download", isOn: Binding(
+                                        get: { selected.contains(transfer.id) },
+                                        set: { if $0 { selected.insert(transfer.id) } else { selected.remove(transfer.id) } }
+                                    )).labelsHidden().toggleStyle(.checkbox)
+                                }
+                                TransferRow(transfer: transfer, model: model,
+                                            showDetails: { model.onProgress?(transfer.id) },
+                                            confirmDownload: { model.askToConfirm(transfer) },
+                                            deleteDownload: {
+                                                deleting = [transfer.id]
+                                                showDelete = true
+                                            })
+                            }
                         }
                     }
                     .padding(.horizontal, 12)
@@ -80,18 +87,36 @@ struct DownloadsPanel: View {
                 .frame(height: inWindow ? nil : min(CGFloat(visible.count) * 73 + 10, 324))
                 .accessibilityLabel("Download list")
             }
+            if inWindow && !visible.isEmpty {
+                HStack {
+                    Button("Select All") { selected = Set(visible.map(\.id)) }
+                    Button("Deselect All") { selected.removeAll() }
+                    Spacer()
+                    Button("Delete Selected…", systemImage: "trash") {
+                        deleting = selected
+                        showDelete = true
+                    }.tint(.red).disabled(selected.isEmpty)
+                }.padding(12)
+            }
             Divider()
             footer
         }
         .frame(width: inWindow ? 538 : 400)
         .tint(accent)
-        .sheet(item: $details) { item in
-            TransferDetailsView(transfer: item, defaultDirectory: model.workspace.destination)
-        }
-        .sheet(item: confirmation, onDismiss: {
-            if inWindow { model.confirmNextIfNeeded() }
-        }) { item in
-            DownloadConfirmationView(transfer: item, model: model)
+        .alert("Delete Downloads?", isPresented: $showDelete) {
+            Button("Delete Files and History", role: .destructive) {
+                let ids = deleting
+                selected.subtract(ids)
+                Task { await model.delete(ids, files: true) }
+            }
+            Button("Delete History Only") {
+                let ids = deleting
+                selected.subtract(ids)
+                Task { await model.delete(ids, files: false) }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Files will be moved to Trash. Active downloads will be stopped.")
         }
         .alert("Clear Finished History?", isPresented: $confirmClear) {
             Button("Clear History", role: .destructive) {
@@ -245,6 +270,7 @@ private struct TransferRow: View {
     let model: DownloadModel
     let showDetails: () -> Void
     let confirmDownload: () -> Void
+    let deleteDownload: () -> Void
     @State private var confirmTrash = false
 
     var body: some View {
@@ -283,9 +309,10 @@ private struct TransferRow: View {
             } else if transfer.state == .completed {
                 icon("folder", "Show in Finder") { model.reveal(transfer) }
             }
-            if transfer.state.terminal {
-                icon("xmark.circle", "Remove from history") { model.removeHistory(transfer) }
-            }
+            Button(action: deleteDownload) {
+                Image(systemName: "trash").foregroundStyle(.red)
+            }.buttonStyle(.borderless).help("Delete Downloads?")
+
             Menu {
                 Button("Download Details", action: showDetails)
                 if !transfer.state.terminal {
@@ -299,7 +326,7 @@ private struct TransferRow: View {
                         Button("Show in Finder") { model.reveal(transfer) }
                         Button("Move File to Trash…", role: .destructive) { confirmTrash = true }
                     }
-                    Button("Remove from history") { model.removeHistory(transfer) }
+                    Button("Delete Downloads?", role: .destructive, action: deleteDownload)
                 }
             } label: {
                 Image(systemName: "ellipsis")

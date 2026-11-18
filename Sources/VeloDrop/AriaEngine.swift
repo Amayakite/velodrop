@@ -36,6 +36,7 @@ final class AriaEngine {
     private var endpoint: URL?
     private var secret = ""
     private(set) var attached = Set<UUID>()
+    private var limits: [UUID: Int] = [:]
 
     init(executable: URL, workingDirectory: URL) {
         self.executable = executable
@@ -53,6 +54,7 @@ final class AriaEngine {
     func start() async throws {
         if process?.isRunning == true { return }
         attached.removeAll()
+        limits.removeAll()
         guard FileManager.default.isExecutableFile(atPath: executable.path) else {
             throw TransferError.engineUnavailable
         }
@@ -88,6 +90,7 @@ final class AriaEngine {
         process = nil
         endpoint = nil
         attached.removeAll()
+        limits.removeAll()
     }
 
     func add(_ transfer: Transfer, stage: URL, connections: Int, headers: BrowserHeaders?) async throws {
@@ -114,6 +117,19 @@ final class AriaEngine {
             }
             let _: String = try await call("aria2.addUri", [[url.absoluteString], options])
             attached.insert(transfer.id)
+            limits[transfer.id] = connections
+        }
+    }
+
+    func configure(_ id: UUID, connections: Int, resume: Bool) async throws {
+        guard attached.contains(id), limits[id] != connections else { return }
+        try await pause(id)
+        let _: String = try await call("aria2.changeOption", [gid(id), [
+            "split": String(connections), "max-connection-per-server": String(connections)
+        ]])
+        limits[id] = connections
+        if resume {
+            let _: String = try await call("aria2.unpause", [gid(id)])
         }
     }
 
@@ -135,6 +151,7 @@ final class AriaEngine {
     }
 
     func remove(_ id: UUID) async {
+        limits.removeValue(forKey: id)
         guard attached.remove(id) != nil else { return }
         let _: String? = try? await call("aria2.forceRemove", [gid(id)])
         let _: String? = try? await call("aria2.removeDownloadResult", [gid(id)])
@@ -142,6 +159,7 @@ final class AriaEngine {
 
     func forget(_ id: UUID) async {
         attached.remove(id)
+        limits.removeValue(forKey: id)
         let _: String? = try? await call("aria2.removeDownloadResult", [gid(id)])
     }
 

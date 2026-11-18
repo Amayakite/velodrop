@@ -64,7 +64,7 @@ struct PreferencesView: View {
 
             Section("Microsoft Edge") {
                 Toggle("Show window after takeover", isOn: $model.showWindowOnCapture)
-                Toggle("Confirm save location before download", isOn: $model.confirmBrowserDownloads)
+                Toggle("Confirm browser downloads", isOn: $model.confirmBrowserDownloads)
                 Text("Set Up Edge opens the extensions page and copies the extension folder path.")
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)

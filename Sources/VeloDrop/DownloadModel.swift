@@ -17,7 +17,12 @@ final class DownloadModel {
     var showWindowOnCapture: Bool {
         didSet { UserDefaults.standard.set(showWindowOnCapture, forKey: "showWindowOnCapture") }
     }
-    var confirmation: Transfer?
+    var confirmation: Transfer? {
+        didSet { onConfirmationChanged?() }
+    }
+    @ObservationIgnored var onConfirmationChanged: (() -> Void)?
+    @ObservationIgnored var onProgress: ((UUID) -> Void)?
+
     @ObservationIgnored var onBrowserIntake: (() -> Void)?
     @ObservationIgnored private var shouldShowIntake = false
     @ObservationIgnored private var browserHeaders: [UUID: BrowserHeaders] = [:]
@@ -38,7 +43,8 @@ final class DownloadModel {
         self.engine = AriaEngine(executable: override ?? executable, workingDirectory: workspace.root)
         self.maxConnections = [1, 4, 8, 16].contains(UserDefaults.standard.integer(forKey: "maxConnections"))
             ? UserDefaults.standard.integer(forKey: "maxConnections") : 8
-        confirmBrowserDownloads = UserDefaults.standard.bool(forKey: "confirmBrowserDownloads")
+        confirmBrowserDownloads = UserDefaults.standard.object(forKey: "confirmBrowserDownloads") == nil
+            ? true : UserDefaults.standard.bool(forKey: "confirmBrowserDownloads")
         showWindowOnCapture = UserDefaults.standard.object(forKey: "showWindowOnCapture") as? Bool ?? true
 
         do {
@@ -86,7 +92,10 @@ final class DownloadModel {
 
     func pause(_ transfer: Transfer) { change(transfer.id, to: .paused) }
     func resume(_ transfer: Transfer) { change(transfer.id, to: .queued) }
-    func cancel(_ transfer: Transfer) { change(transfer.id, to: .canceled) }
+    func cancel(_ transfer: Transfer) {
+        change(transfer.id, to: .canceled)
+        if confirmation?.id == transfer.id { confirmation = nil }
+    }
 
     func useEdge(_ transfer: Transfer) {
         change(transfer.id, to: .failed, message: String(localized: "Sent back to Edge."))
@@ -104,21 +113,43 @@ final class DownloadModel {
     func askToConfirm(_ transfer: Transfer) {
         guard transfer.state == .awaitingConfirmation else { return }
         confirmation = transfer
+        showPendingIntake()
     }
 
     func confirmNextIfNeeded() {
-        guard confirmation == nil else { return }
-        confirmation = transfers.last { $0.state == .awaitingConfirmation }
+        guard confirmation == nil, let pending = transfers.last(where: { $0.state == .awaitingConfirmation }) else { return }
+        confirmation = pending
     }
 
-    func confirm(_ transfer: Transfer, into directory: URL) {
+    func confirm(_ transfer: Transfer, into directory: URL, connections: Int) {
         guard var item = transfers.first(where: { $0.id == transfer.id }),
               item.state == .awaitingConfirmation else { return }
+        item.connectionLimit = connections
         item.destinationPath = directory.standardizedFileURL.path
         item.state = .queued
         save(item)
         confirmation = nil
+        onProgress?(item.id)
         startLoop()
+    }
+
+    func setConnections(_ id: UUID, count: Int) {
+        guard (1...16).contains(count),
+              var item = transfers.first(where: { $0.id == id }), !item.state.terminal else { return }
+        item.connectionLimit = count
+        save(item)
+        startLoop()
+    }
+
+    func delete(_ ids: Set<UUID>, files: Bool) async {
+        for id in ids {
+            guard let item = transfers.first(where: { $0.id == id }) else { continue }
+            if !item.state.terminal { cancel(item) }
+            await engine.remove(id)
+            guard let current = transfers.first(where: { $0.id == id }) else { continue }
+            if files && current.finalPath != nil { trash(current) }
+            else { removeHistory(current) }
+        }
     }
 
     func reveal(_ transfer: Transfer) {
@@ -201,7 +232,7 @@ final class DownloadModel {
     private func drainInbox() {
         for (path, var transfer, headers) in workspace.incoming() {
             if workspace.browserStatus(transfer.id) == nil && !workspace.wasAbandoned(transfer.id) {
-                if confirmBrowserDownloads && transfer.fromBrowser && transfer.browserHeaderNames != nil {
+                if confirmBrowserDownloads && transfer.fromBrowser {
                     transfer.state = .awaitingConfirmation
                 }
                 save(transfer)
@@ -230,7 +261,7 @@ final class DownloadModel {
         guard let url = item.url else { throw TransferError.invalidURL }
         item.effectiveProxy = try ProxyRouting.route(item.browserProxy, for: url)
         if item.effectiveProxy != transfer.effectiveProxy { save(item) }
-        try await engine.add(item, stage: workspace.stage(item.id), connections: maxConnections, headers: headers)
+        try await engine.add(item, stage: workspace.stage(item.id), connections: item.connectionLimit ?? maxConnections, headers: headers)
     }
 
     private func startLoop() {
@@ -266,6 +297,10 @@ final class DownloadModel {
             }
             do {
                 try await engine.start()
+                for item in transfers where engine.attached.contains(item.id) && !item.state.terminal {
+                    try await engine.configure(item.id, connections: item.connectionLimit ?? maxConnections,
+                                               resume: item.state.running)
+                }
                 let statuses = try await engine.statuses(Array(engine.attached))
                 for item in paused {
                     if statuses[item.id]?.status == "complete" { await update(item.id, with: statuses[item.id]); continue }

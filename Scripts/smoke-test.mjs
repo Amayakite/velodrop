@@ -242,7 +242,7 @@ try {
     allowed_origins: ["chrome-extension://" + id + "/"],
   }));
 
-  const startDesktop = () => child(desktopBinary, [], { env: { ...env, VELODROP_BACKGROUND_LAUNCH: "1" } }, appLog);
+  const startDesktop = () => child(desktopBinary, ["-confirmBrowserDownloads", "NO"], { env: { ...env, VELODROP_BACKGROUND_LAUNCH: "1" } }, appLog);
   assert.equal(runningDesktop(), null, "Quit the packaged test build before running this test.");
   assert.equal(nativeMessage({ action: "ping" }).ok, true);
 
@@ -298,6 +298,8 @@ try {
   `);
 
   requestedDesktopLaunch = true;
+  desktop = startDesktop();
+  await waitFor("test desktop startup", runningDesktop);
   await start("parallel.zip");
   launchedDesktop = await waitFor("Edge starting the desktop app", runningDesktop);
   await waitFor("original Edge item removed before completion", async () =>
