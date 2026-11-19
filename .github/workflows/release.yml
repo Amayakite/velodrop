@@ -87,7 +87,7 @@ jobs:
           test -n "$dmg"
           hdiutil verify "$dmg"
           codesign --verify --deep --strict .dist/VeloDrop.app
-          shasum -a 256 "$dmg" > .dist/SHA256SUMS.txt
+          ( cd .dist && shasum -a 256 "$(basename "$dmg")" > SHA256SUMS.txt )
           cat .dist/SHA256SUMS.txt
 
       - name: Prepare release notes
