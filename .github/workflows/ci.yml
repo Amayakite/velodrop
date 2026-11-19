@@ -19,10 +19,10 @@ jobs:
     runs-on: macos-15
     steps:
       - name: Check out
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: "22"
 
@@ -61,7 +61,7 @@ jobs:
       VELODROP_BUILD_NUMBER: ${{ github.run_number }}
     steps:
       - name: Check out
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Read version
         id: version
@@ -70,7 +70,7 @@ jobs:
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
       - name: Cache aria2 build
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: .build/engine-*
           key: aria2-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Scripts/build-engine.sh', 'Scripts/aria2-scoped-headers.patch') }}
@@ -89,7 +89,7 @@ jobs:
           cat .dist/SHA256SUMS.txt
 
       - name: Upload DMG artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: VeloDrop-${{ steps.version.outputs.version }}-build-${{ github.run_number }}
           path: |
