@@ -17,7 +17,7 @@ VeloDrop 的版本记录。版本号以 `Extension/manifest.json` 为准，发�
 
 ### 工程与发布
 
-- 新增 GitHub Actions CI：push/PR 构建、核心检查、本地化与扩展 JavaScript 语法检查；main 分支额外产出未签名 DMG artifact。
+- 新增 GitHub Actions CI：push/PR 构建、核心检查、本地化与扩展 JavaScript 语法检查；main 分支额外产出 ad-hoc 签名、未发布的 DMG artifact。
 - 新增 `v*` tag 自动发布流水线：在 arm64 macOS runner 上构建 DMG、验证签名与镜像、生成 SHA256，并创建 GitHub Release。
 - `Scripts/package.sh` 支持 `VELODROP_BUILD_NUMBER`，CI 会把运行编号写入 `CFBundleVersion`。
 - 新增发布说明文档，版本号、tag 和 DMG 文件名保持同一来源。
