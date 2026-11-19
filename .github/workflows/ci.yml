@@ -95,4 +95,5 @@ jobs:
           path: |
             .dist/*.dmg
             .dist/SHA256SUMS.txt
+          include-hidden-files: true
           retention-days: 14
