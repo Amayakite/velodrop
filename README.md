@@ -1,5 +1,7 @@
 # VeloDrop
 
+[![CI](https://github.com/Amayakite/velodrop/actions/workflows/ci.yml/badge.svg)](https://github.com/Amayakite/velodrop/actions/workflows/ci.yml)
+
 VeloDrop 是一款原生 macOS 下载器。菜单栏图标打开下载窗口，也可通过 Dock 或 ⌘Tab 切回应用。Microsoft Edge 可以自动把普通文件下载交给 VeloDrop。
 
 ## 安装
@@ -35,6 +37,13 @@ node Scripts/smoke-test.mjs
 ```
 
 安装包位于 `.dist/`。设置 `VELODROP_SIGN_IDENTITY` 可用自己的 Developer ID 签名。端到端测试需要安装 Microsoft Edge 和 Node.js 22 或更新版本，使用临时浏览器配置、临时下载目录和本机 HTTP 测试服务。请在测试前退出同一套打包产物。
+
+### 自动构建与发布
+
+- push 和 pull request 会运行 [CI](.github/workflows/ci.yml)：Release 构建、`VeloCoreChecks`、本地化校验、扩展 JavaScript 语法检查和脚本语法检查。
+- main 分支的 CI 会额外产出一个可用 Actions artifact 下载的未发布 DMG。
+- 推送 `v*` tag 会触发 [Release](.github/workflows/release.yml)：在 arm64 `macos-15` runner 上重新打包、验证 DMG 与签名、生成 SHA256，并自动创建 GitHub Release。
+- 版本号唯一来源是 `Extension/manifest.json`，发布 tag 必须与它一致。完整步骤、手动重跑、签名与常见问题见 [docs/RELEASING.md](docs/RELEASING.md)，版本记录见 [CHANGELOG.md](CHANGELOG.md)。
 
 ## 实现
 

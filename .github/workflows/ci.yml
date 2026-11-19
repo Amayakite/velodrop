@@ -1,0 +1,98 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Build and verify
+    runs-on: macos-15
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Show toolchain
+        run: |
+          sw_vers
+          uname -m
+          swift --version
+          node --version
+
+      - name: Build release
+        run: swift build -c release
+
+      - name: Run core checks
+        run: swift run -c release VeloCoreChecks
+
+      - name: Validate localizations
+        run: plutil -lint Resources/zh-Hans.lproj/Localizable.strings
+
+      - name: Check extension JavaScript
+        run: |
+          for file in Extension/*.js; do
+            echo "Checking $file"
+            node --check "$file"
+          done
+
+      - name: Check shell scripts
+        run: bash -n Scripts/package.sh Scripts/build-engine.sh
+
+  package:
+    name: Package DMG artifact
+    runs-on: macos-15
+    needs: verify
+    if: github.event_name != 'pull_request'
+    env:
+      VELODROP_BUILD_NUMBER: ${{ github.run_number }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Read version
+        id: version
+        run: |
+          version="$(plutil -extract version raw -o - Extension/manifest.json)"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Cache aria2 build
+        uses: actions/cache@v4
+        with:
+          path: .build/engine-*
+          key: aria2-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Scripts/build-engine.sh', 'Scripts/aria2-scoped-headers.patch') }}
+
+      - name: Build DMG
+        run: Scripts/package.sh .dist
+
+      - name: Verify DMG
+        run: |
+          set -euo pipefail
+          dmg="$(find .dist -maxdepth 1 -name 'VeloDrop-*-macos-*.dmg' -print -quit)"
+          test -n "$dmg"
+          hdiutil verify "$dmg"
+          codesign --verify --deep --strict .dist/VeloDrop.app
+          shasum -a 256 "$dmg" > .dist/SHA256SUMS.txt
+          cat .dist/SHA256SUMS.txt
+
+      - name: Upload DMG artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: VeloDrop-${{ steps.version.outputs.version }}-build-${{ github.run_number }}
+          path: |
+            .dist/*.dmg
+            .dist/SHA256SUMS.txt
+          retention-days: 14

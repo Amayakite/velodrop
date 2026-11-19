@@ -7,6 +7,7 @@ out="${1:-$root/.dist}"
 app="$out/VeloDrop.app"
 identity="${VELODROP_SIGN_IDENTITY:--}"
 version="$(plutil -extract version raw -o - "$root/Extension/manifest.json")"
+build_number="${VELODROP_BUILD_NUMBER:-$(git rev-list --count HEAD 2>/dev/null || echo 1)}"
 dmg="VeloDrop-$version-macos-$(uname -m).dmg"
 
 "$root/Scripts/build-engine.sh"
@@ -49,7 +50,7 @@ cat > "$contents/Info.plist" <<PLIST
     <key>CFBundleIconFile</key><string>AppIcon</string>
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>CFBundleShortVersionString</key><string>$version</string>
-    <key>CFBundleVersion</key><string>9</string>
+    <key>CFBundleVersion</key><string>$build_number</string>
     <key>LSMinimumSystemVersion</key><string>14.0</string>
     <key>LSUIElement</key><false/>
     <key>NSHighResolutionCapable</key><true/>

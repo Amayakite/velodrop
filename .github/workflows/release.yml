@@ -1,0 +1,140 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to publish, for example v0.5.0"
+        required: true
+        type: string
+
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Package and publish DMG
+    runs-on: macos-15
+    env:
+      VELODROP_BUILD_NUMBER: ${{ github.run_number }}
+    steps:
+      - name: Check out release tag
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.tag || github.ref_name }}
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Show toolchain
+        run: |
+          sw_vers
+          uname -m
+          swift --version
+          node --version
+
+      - name: Resolve and validate version
+        id: version
+        env:
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          tag="$RELEASE_TAG"
+          case "$tag" in
+            v*) ;;
+            *) echo "Release requires a v* tag, got: $tag" >&2; exit 1 ;;
+          esac
+          version="${tag#v}"
+          manifest="$(plutil -extract version raw -o - Extension/manifest.json)"
+          if [ "$version" != "$manifest" ]; then
+            echo "Tag $tag does not match Extension/manifest.json version $manifest" >&2
+            exit 1
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Validate sources
+        run: |
+          swift build -c release
+          swift run -c release VeloCoreChecks
+          plutil -lint Resources/zh-Hans.lproj/Localizable.strings
+          for file in Extension/*.js; do node --check "$file"; done
+          bash -n Scripts/package.sh Scripts/build-engine.sh
+
+      - name: Cache aria2 build
+        uses: actions/cache@v4
+        with:
+          path: .build/engine-*
+          key: aria2-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Scripts/build-engine.sh', 'Scripts/aria2-scoped-headers.patch') }}
+
+      - name: Build DMG
+        run: Scripts/package.sh .dist
+
+      - name: Verify DMG and write checksum
+        run: |
+          set -euo pipefail
+          dmg="$(find .dist -maxdepth 1 -name 'VeloDrop-*-macos-*.dmg' -print -quit)"
+          test -n "$dmg"
+          hdiutil verify "$dmg"
+          codesign --verify --deep --strict .dist/VeloDrop.app
+          shasum -a 256 "$dmg" > .dist/SHA256SUMS.txt
+          cat .dist/SHA256SUMS.txt
+
+      - name: Prepare release notes
+        run: |
+          set -euo pipefail
+          version="${{ steps.version.outputs.version }}"
+          awk -v ver="$version" '
+            index($0, "## [" ver "]") == 1 { capture = 1; next }
+            capture && /^## / { exit }
+            capture { print }
+          ' CHANGELOG.md > release-notes.md
+          if [ ! -s release-notes.md ]; then
+            printf 'VeloDrop %s\n' "$version" > release-notes.md
+          fi
+          cat >> release-notes.md <<'EOF'
+
+          ---
+
+          **安装**：下载 `VeloDrop-VERSION-macos-arm64.dmg`，打开后把 `VeloDrop.app` 拖入「应用程序」。  
+          **要求**：Apple 芯片，macOS 14 或更新版本。  
+          **签名**：ad-hoc 签名，尚未经过 Apple 公证；首次打开如被系统拦截，请在 Finder 中右键选择「打开」。  
+          **升级**：安装后在 Edge 扩展页重新加载 VeloDrop 扩展。
+          EOF
+          sed -i '' "s/VERSION/$version/g" release-notes.md
+
+      - name: Upload release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: VeloDrop-${{ steps.version.outputs.version }}-release
+          path: |
+            .dist/*.dmg
+            .dist/SHA256SUMS.txt
+          retention-days: 30
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          command -v gh >/dev/null || brew install gh
+          tag="${{ steps.version.outputs.tag }}"
+          version="${{ steps.version.outputs.version }}"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" .dist/*.dmg .dist/SHA256SUMS.txt --clobber
+            gh release edit "$tag" --title "VeloDrop $version" --notes-file release-notes.md
+          else
+            gh release create "$tag" .dist/*.dmg .dist/SHA256SUMS.txt \
+              --verify-tag --title "VeloDrop $version" \
+              --notes-file release-notes.md --latest
+          fi
