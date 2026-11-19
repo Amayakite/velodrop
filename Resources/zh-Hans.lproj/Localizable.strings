@@ -204,3 +204,42 @@
 "Continue" = "继续";
 
 "Version" = "版本";
+
+"New Download" = "新建下载";
+"Ready to download" = "准备就绪";
+"Library" = "下载库";
+"This Month" = "本月";
+"%lld finished" = "已完成 %lld 个";
+"%lld connections" = "%lld 个连接";
+"Newest" = "最新";
+"Confirm" = "待确认";
+"Queued" = "排队中";
+"Failed" = "失败";
+"In Edge" = "在 Edge 中";
+"From Edge" = "来自 Edge";
+"From Microsoft Edge" = "来自 Microsoft Edge";
+"Try a different search or file type." = "换个关键词或文件类型试试。";
+"Delete Download?" = "删除下载？";
+"Connections" = "连接数";
+"Location" = "位置";
+"Storage" = "存储";
+"Queue" = "队列";
+"Files" = "文件";
+"Browser Takeover" = "浏览器接管";
+"Connected" = "已连接";
+"Not Connected" = "未连接";
+"Microsoft Edge" = "Microsoft Edge";
+"Simultaneous downloads" = "同时下载任务数";
+"%lld of 3" = "第 %lld 步，共 3 步";
+"A faster, friendlier download manager for your Mac." = "更快、更顺手的 Mac 下载管理器。";
+"Choose where files are saved and what happens after a download." = "选择文件保存位置，以及下载完成后的行为。";
+"Control the queue, connections, and browser confirmations." = "控制下载队列、连接数和浏览器下载确认。";
+"Connect the browser extension and review takeover rules." = "连接浏览器扩展，并查看接管规则。";
+"Set a global bandwidth limit and review proxy behavior." = "设置全局带宽上限，并查看代理方式。";
+
+"%lld active" = "%lld 个任务";
+
+"All Downloads" = "全部下载";
+
+"Pause All" = "全部暂停";
+"Resume All" = "全部继续";

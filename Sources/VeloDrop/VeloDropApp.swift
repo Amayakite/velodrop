@@ -64,6 +64,8 @@ final class AppLifecycle: NSObject, NSApplicationDelegate, NSWindowDelegate {
         confirmationWindow = makeWindow(title: String(localized: "Confirm Download")) {
             DownloadConfirmationView(transfer: item, model: model)
         }
+        confirmationWindow?.titleVisibility = .hidden
+        confirmationWindow?.titlebarAppearsTransparent = true
         present(confirmationWindow)
     }
 
@@ -144,6 +146,8 @@ final class AppLifecycle: NSObject, NSApplicationDelegate, NSWindowDelegate {
                     self?.openDownloads()
                 }
             }
+            welcomeWindow?.titleVisibility = .hidden
+            welcomeWindow?.titlebarAppearsTransparent = true
         }
         present(welcomeWindow)
     }
@@ -152,7 +156,6 @@ final class AppLifecycle: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if settingsWindow == nil {
             settingsWindow = makeWindow(title: String(localized: "VeloDrop Settings")) {
                 PreferencesView(model: model)
-                    .frame(width: 580, height: 510)
             }
         }
         present(settingsWindow)
@@ -162,10 +165,12 @@ final class AppLifecycle: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if downloadsWindow == nil {
             downloadsWindow = makeWindow(title: "VeloDrop") {
                 DownloadsPanel(model: model, inWindow: true, openPreferences: openPreferences, openDownloads: openDownloads)
-                    .frame(minWidth: 760, minHeight: 480)
+                    .frame(minWidth: 820, minHeight: 540)
             }
-            downloadsWindow?.styleMask.insert(.resizable)
-            downloadsWindow?.setContentSize(NSSize(width: 1000, height: 620))
+            downloadsWindow?.styleMask.insert([.resizable, .fullSizeContentView])
+            downloadsWindow?.titleVisibility = .hidden
+            downloadsWindow?.titlebarAppearsTransparent = true
+            downloadsWindow?.setContentSize(NSSize(width: 1100, height: 728))
         }
         present(downloadsWindow)
     }
@@ -190,15 +195,5 @@ final class AppLifecycle: NSObject, NSApplicationDelegate, NSWindowDelegate {
         // Browser capture explicitly requests a foreground dialog, including repeated
         // handoffs after Edge became active again.
         NSApp.activate(ignoringOtherApps: true)
-    }
-}
-
-enum Format {
-    static func bytes(_ value: Int64) -> String {
-        ByteCountFormatter.string(fromByteCount: max(value, 0), countStyle: .file)
-    }
-
-    static func rate(_ value: Int64) -> String {
-        value > 0 ? bytes(value) + "/s" : "0 KB/s"
     }
 }
