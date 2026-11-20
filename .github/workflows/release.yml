@@ -87,6 +87,14 @@ jobs:
           test -n "$dmg"
           hdiutil verify "$dmg"
           codesign --verify --deep --strict .dist/VeloDrop.app
+          codesign --verify --deep --strict ".dist/Install VeloDrop.app"
+          mount="$(mktemp -d)"
+          hdiutil attach "$dmg" -nobrowse -readonly -mountpoint "$mount" >/dev/null
+          test -d "$mount/Install VeloDrop.app"
+          test -x "$mount/Install VeloDrop.app/Contents/MacOS/VeloDropInstaller"
+          test -d "$mount/Install VeloDrop.app/Contents/Resources/Payload/VeloDrop.app"
+          hdiutil detach "$mount" -quiet
+          rmdir "$mount"
           ( cd .dist && shasum -a 256 "$(basename "$dmg")" > SHA256SUMS.txt )
           cat .dist/SHA256SUMS.txt
 
@@ -106,10 +114,10 @@ jobs:
 
           ---
 
-          **安装**：下载 `VeloDrop-VERSION-macos-arm64.dmg`，打开后把 `VeloDrop.app` 拖入「应用程序」。  
-          **要求**：Apple 芯片，macOS 14 或更新版本。  
-          **签名**：ad-hoc 签名，尚未经过 Apple 公证；首次打开如被系统拦截，请在 Finder 中右键选择「打开」。  
-          **升级**：安装后在 Edge 扩展页重新加载 VeloDrop 扩展。
+          - **安装**：下载 `VeloDrop-VERSION-macos-arm64.dmg`，打开后双击「Install VeloDrop」。安装器会退出正在运行的旧版本、替换「应用程序」中的应用并重新打开。
+          - **要求**：Apple 芯片，macOS 14 或更新版本。
+          - **签名**：ad-hoc 签名，尚未经过 Apple 公证；首次打开如被系统拦截，请在 Finder 中右键「Install VeloDrop.app」选择「打开」。
+          - **升级**：直接再次运行安装器即可，无需先手动退出旧版本。从 0.6.0 起扩展会自动重新加载；从更早版本升级时，请在 Edge 扩展页重新加载一次。
           EOF
           sed -i '' "s/VERSION/$version/g" release-notes.md
 

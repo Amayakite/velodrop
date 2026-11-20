@@ -9,27 +9,39 @@
     "message": "已连接到 VeloDrop"
   },
   "notConnected": {
-    "message": "请在 VeloDrop 设置中配置 Edge"
+    "message": "未连接到 VeloDrop"
   },
-  "autoTakeover": {
-    "message": "自动接管下载"
+  "bridgeOnly": {
+    "message": "这个扩展只负责把 Edge 的下载交给 VeloDrop。所有设置都在 VeloDrop 应用中。"
   },
-  "minimumSize": {
-    "message": "最小文件大小"
+  "bridgeHint": {
+    "message": "在 VeloDrop 设置里调整接管开关、最小文件大小和保留在 Edge 下载的网站。"
   },
-  "excludedHosts": {
-    "message": "由 Edge 下载的网站"
+  "openVeloDrop": {
+    "message": "打开 VeloDrop 设置"
   },
-  "settingsHint": {
-    "message": "每行一个域名。最小文件大小设为 0 时，也会接管小文件。"
+  "settingsManaged": {
+    "message": "设置由 VeloDrop 管理"
   },
-  "browserNetwork": {
-    "message": "沿用 Edge 会话请求头"
+  "takeoverOn": {
+    "message": "自动接管已开启"
   },
-  "browserNetworkHint": {
-    "message": "开启后需要站点权限。会话请求头仅用于本次下载。"
+  "takeoverOff": {
+    "message": "自动接管已关闭"
   },
-  "useEdgeForSite": {
-    "message": "当前站点交给 Edge 下载"
+  "minimumShort": {
+    "message": "最小 $SIZE$ MiB",
+    "placeholders": {
+      "size": { "content": "$1" }
+    }
+  },
+  "excludedShort": {
+    "message": "排除 $COUNT$ 个网站",
+    "placeholders": {
+      "count": { "content": "$1" }
+    }
+  },
+  "excludedNone": {
+    "message": "没有排除网站"
   }
 }

@@ -85,6 +85,14 @@ jobs:
           test -n "$dmg"
           hdiutil verify "$dmg"
           codesign --verify --deep --strict .dist/VeloDrop.app
+          codesign --verify --deep --strict ".dist/Install VeloDrop.app"
+          mount="$(mktemp -d)"
+          hdiutil attach "$dmg" -nobrowse -readonly -mountpoint "$mount" >/dev/null
+          test -d "$mount/Install VeloDrop.app"
+          test -x "$mount/Install VeloDrop.app/Contents/MacOS/VeloDropInstaller"
+          test -d "$mount/Install VeloDrop.app/Contents/Resources/Payload/VeloDrop.app"
+          hdiutil detach "$mount" -quiet
+          rmdir "$mount"
           ( cd .dist && shasum -a 256 "$(basename "$dmg")" > SHA256SUMS.txt )
           cat .dist/SHA256SUMS.txt
 

@@ -136,7 +136,7 @@ struct WelcomeView: View {
                         .font(.system(size: 10))
                         .foregroundStyle(VD.green)
                 } else {
-                    Text("Open the VeloDrop extension in Edge, then check the connection here.")
+                    Text("The bridge checks in automatically after Edge loads the extension.")
                         .font(.system(size: 9.5))
                         .foregroundStyle(.tertiary)
                 }

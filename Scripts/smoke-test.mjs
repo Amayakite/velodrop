@@ -242,7 +242,22 @@ try {
     allowed_origins: ["chrome-extension://" + id + "/"],
   }));
 
-  const startDesktop = () => child(desktopBinary, ["-confirmBrowserDownloads", "NO"], { env: { ...env, VELODROP_BACKGROUND_LAUNCH: "1" } }, appLog);
+  // Takeover rules belong to the app now. The bridge reads this file, so write
+  // it before Edge starts, and keep the argument-domain overrides aligned so a
+  // developer's real preferences cannot leak into the test run.
+  const rules = { enabled: true, minimumMiB: 2, excludedHosts: "", reuseSessionHeaders: true };
+  const writeRules = change => writeFileSync(join(home, "browser-rules.json"),
+    JSON.stringify({ ...rules, ...change }));
+  mkdirSync(home, { recursive: true });
+  writeRules({});
+
+  const startDesktop = () => child(desktopBinary, [
+    "-confirmBrowserDownloads", "NO",
+    "-browserTakeoverEnabled", "YES",
+    "-browserMinimumMiB", "2",
+    "-browserExcludedHosts", "",
+    "-browserReuseSessionHeaders", "YES",
+  ], { env: { ...env, VELODROP_BACKGROUND_LAUNCH: "1" } }, appLog);
   assert.equal(runningDesktop(), null, "Quit the packaged test build before running this test.");
   assert.equal(nativeMessage({ action: "ping" }).ok, true);
 
@@ -274,18 +289,20 @@ try {
     (await cdp.run(popup, 'document.querySelector("#status")?.dataset.connected')) === "true", 6000);
   const popupLabels = await cdp.run(popup, `({
     language: document.documentElement.lang,
-    autoTakeover: document.querySelector("[data-message=autoTakeover]").textContent,
+    takeover: document.querySelector("#takeover").textContent,
     connection: document.querySelector("#status").textContent,
+    hasSettingsControls: Boolean(document.querySelector("input, textarea, #enabled, #hosts")),
   })`);
+  assert.equal(popupLabels.hasSettingsControls, false, "The popup only reports bridge status.");
   if (smokeLocale) assert.equal(popupLabels.language, smokeLocale);
   if (popupLabels.language === "zh-CN") {
-    assert.equal(popupLabels.autoTakeover, "自动接管下载");
+    assert.equal(popupLabels.takeover, "自动接管已开启");
     assert.equal(popupLabels.connection, "已连接到 VeloDrop");
   } else if (popupLabels.language.startsWith("en")) {
-    assert.equal(popupLabels.autoTakeover, "Automatically take over downloads");
-    assert.equal(popupLabels.connection, "Connected to your Mac");
+    assert.equal(popupLabels.takeover, "Takeover on");
+    assert.equal(popupLabels.connection, "Connected to VeloDrop");
   } else {
-    assert.ok(popupLabels.autoTakeover && popupLabels.connection);
+    assert.ok(popupLabels.takeover && popupLabels.connection);
   }
   console.log("Edge extension loaded and connected to the native host (" + popupLabels.language + ").");
 
@@ -375,11 +392,11 @@ try {
   assert.equal(sha256(join(nativeDownloads, "redirect.zip")), digest);
   console.log("Scoped browser headers and HTTP proxy worked, and a redirected request received neither credential.");
 
-  await cdp.run(popup, "chrome.storage.local.set({ excludedHosts: '127.0.0.1' })");
+  writeRules({ excludedHosts: "127.0.0.1" });
   await start("site-excluded.zip");
   await waitFor("excluded site left in Edge", async () => (await browserState("site-excluded.zip"))?.state === "complete");
   assert.equal(records().some(item => item.name === "site-excluded.zip"), false);
-  await cdp.run(popup, "chrome.storage.local.set({ excludedHosts: '' })");
+  writeRules({});
   console.log("The excluded site downloaded in Edge without a VeloDrop entry.");
 
   const restartID = crypto.randomUUID();

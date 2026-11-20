@@ -1,14 +1,15 @@
 :root { color-scheme: light dark; font: 13px system-ui; accent-color: #4d72f6; }
-body { width: 278px; margin: 0; padding: 15px; }
-header { display: flex; gap: 11px; align-items: center; margin-bottom: 12px; }
-h1 { font-size: 16px; margin: 0; }
-p { margin: 3px 0 0; }
-main { display: grid; gap: 7px; }
-.switch { display: flex; align-items: center; justify-content: space-between; padding: 9px 0; border-block: 1px solid color-mix(in srgb, currentColor 18%, transparent); margin-bottom: 4px; }
-label { font-weight: 500; }
-textarea, input[type=number] { box-sizing: border-box; border: 1px solid color-mix(in srgb, currentColor 24%, transparent); border-radius: 6px; padding: 5px 8px; font: inherit; }
-input[type=number] { width: 76px; }
-.number { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
-textarea { resize: vertical; }
-.hint, #status { color: color-mix(in srgb, currentColor 70%, transparent); font-size: 11px; }
+body { width: 286px; margin: 0; padding: 16px; }
+header { display: flex; gap: 12px; align-items: center; margin-bottom: 14px; }
+h1 { font-size: 17px; margin: 0; }
+p { margin: 0; }
+main { display: grid; gap: 10px; }
+#status { margin-top: 3px; color: color-mix(in srgb, currentColor 68%, transparent); font-size: 11px; }
 #status[data-connected=true] { color: light-dark(#147246, #75d7a3); }
+.lede { font-size: 12px; line-height: 1.45; }
+.summary { display: flex; flex-wrap: wrap; gap: 5px; }
+.summary span { padding: 3px 7px; border-radius: 999px; background: color-mix(in srgb, currentColor 8%, transparent); font-size: 10px; }
+.hint { color: color-mix(in srgb, currentColor 66%, transparent); font-size: 10.5px; line-height: 1.4; }
+button { border: 1px solid color-mix(in srgb, currentColor 18%, transparent); border-radius: 7px; padding: 7px 10px; font: inherit; font-size: 11.5px; font-weight: 600; color: white; background: #4d72f6; cursor: pointer; }
+button:disabled { opacity: 0.55; cursor: default; }
+footer { display: flex; justify-content: space-between; gap: 8px; margin-top: 14px; padding-top: 10px; border-top: 1px solid color-mix(in srgb, currentColor 12%, transparent); color: color-mix(in srgb, currentColor 55%, transparent); font-size: 10px; }

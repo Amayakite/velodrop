@@ -1,23 +1,19 @@
 import { normalizedHost, observeBrowserRequests, requestContext } from "./network.js";
 
-observeBrowserRequests();
-
 const host = "com.amayakite.velodrop";
 const alarm = "velodrop-watch";
 const prefix = "transfer:";
 const starting = new Set();
-const defaults = { enabled: true, minimumMiB: 2, excludedHosts: "" };
+const defaults = { enabled: true, minimumMiB: 2, excludedHosts: "", reuseSessionHeaders: false };
 let pulse;
 let sweeping = false;
-let settings = chrome.storage.local.get(defaults);
-chrome.storage.onChanged.addListener((_changes, area) => {
-  if (area === "local") {
-    settings = chrome.storage.local.get(defaults);
-    if (["enabled", "minimumMiB", "excludedHosts"].some(key => key in _changes)) {
-      void settings.then(rules => native({ action: "ping", rules })).catch(() => {});
-    }
-  }
-});
+let cachedRules = null;
+let rulesAt = 0;
+let rulesRequest = null;
+
+// The extension is only a bridge. Settings are owned by the VeloDrop app and
+// fetched through the native helper; the popup never writes configuration.
+observeBrowserRequests(() => cachedRules?.reuseSessionHeaders === true);
 
 function native(message, timeout = 2400) {
   let timer;
@@ -27,6 +23,49 @@ function native(message, timeout = 2400) {
       timer = setTimeout(() => reject(new Error("VeloDrop did not respond")), timeout);
     }),
   ]).finally(() => clearTimeout(timer));
+}
+
+async function reloadWhenIdle() {
+  const data = await chrome.storage.local.get(null);
+  const busy = starting.size > 0 || Object.keys(data).some(key => key.startsWith(prefix));
+  if (busy) {
+    setTimeout(() => void reloadWhenIdle(), 3000);
+    return;
+  }
+  chrome.runtime.reload();
+}
+
+async function rememberAppVersion(version) {
+  if (!version) return;
+  const { appVersion = "" } = await chrome.storage.local.get({ appVersion: "" });
+  if (appVersion === version) return;
+  await chrome.storage.local.set({ appVersion: version });
+  // The app was replaced while this service worker kept running. Reloading
+  // picks up the Edge extension shipped with the new version, but wait until
+  // no handoff is in flight so an update cannot interrupt a download.
+  if (appVersion) setTimeout(() => void reloadWhenIdle(), 80);
+}
+
+async function pingApp() {
+  const reply = await native({ action: "ping" });
+  if (!reply?.ok) throw new Error("VeloDrop is not ready");
+  await rememberAppVersion(reply.version);
+  if (reply.rules) {
+    cachedRules = { ...defaults, ...reply.rules };
+    rulesAt = Date.now();
+  }
+  return reply;
+}
+
+async function currentRules(force = false) {
+  if (!force && cachedRules && Date.now() - rulesAt < 5000) return cachedRules;
+  if (!rulesRequest) {
+    rulesRequest = pingApp()
+      .then(() => cachedRules ?? defaults)
+      .catch(() => cachedRules ?? defaults)
+      .finally(() => { rulesRequest = null; });
+  }
+  return rulesRequest;
 }
 
 function safeURL(value) {
@@ -100,10 +139,10 @@ async function takeOver(item) {
   let port;
   let canceled = false;
   try {
-    const currentSettings = await settings;
+    const currentSettings = await currentRules(true);
     const url = eligible(item, currentSettings);
     if (!url) return;
-    const context = await requestContext(item, url);
+    const context = await requestContext(item, url, currentSettings.reuseSessionHeaders);
     if (!context) return;
     const fast = Boolean(replayable(item, context));
     handoff = {
@@ -288,10 +327,29 @@ chrome.downloads.onErased.addListener(() => schedule());
 chrome.alarms.onAlarm.addListener(event => {
   if (event.name === alarm) void sweep();
 });
-chrome.runtime.onStartup.addListener(() => void sweep());
-chrome.runtime.onInstalled.addListener(() => void sweep());
+chrome.runtime.onStartup.addListener(() => {
+  void currentRules(true);
+  void sweep();
+});
+chrome.runtime.onInstalled.addListener(details => {
+  if (details.reason === "update") {
+    // VeloDrop 0.5 kept takeover rules in extension storage. The app owns them
+    // now; drop the leftover keys so they cannot be mistaken for live state.
+    void chrome.storage.local.remove(["enabled", "minimumMiB", "excludedHosts"]);
+  }
+  void currentRules(true);
+  void sweep();
+});
 chrome.runtime.onMessage.addListener((message, _, reply) => {
+  if (message.action === "open") {
+    native({ action: "open" }).then(() => reply({ ok: true }), () => reply({ ok: false }));
+    return true;
+  }
   if (message.action !== "ping") return false;
-  settings.then(rules => native({ action: "ping", rules })).then(reply, () => reply({ ok: false }));
+  pingApp().then(reply, () => reply({ ok: false }));
   return true;
 });
+// Register the bridge early so Settings can show a recent connection even
+// before the first download or popup visit.
+void currentRules(true);
+

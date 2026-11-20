@@ -1,35 +1,47 @@
 {
   "extensionDescription": {
-    "message": "Send ordinary Edge file downloads to VeloDrop for macOS."
+    "message": "Pass ordinary Edge file downloads to VeloDrop for macOS."
   },
   "checkingConnection": {
-    "message": "Checking connection…"
+    "message": "Checking bridge…"
   },
   "connected": {
-    "message": "Connected to your Mac"
+    "message": "Connected to VeloDrop"
   },
   "notConnected": {
-    "message": "Set up Edge in VeloDrop Settings"
+    "message": "VeloDrop is not connected"
   },
-  "autoTakeover": {
-    "message": "Automatically take over downloads"
+  "bridgeOnly": {
+    "message": "This extension only passes Edge downloads to VeloDrop. All settings live in the VeloDrop app."
   },
-  "minimumSize": {
-    "message": "Minimum file size"
+  "bridgeHint": {
+    "message": "Use VeloDrop Settings to change which downloads are taken over, the minimum size, and sites that stay in Edge."
   },
-  "excludedHosts": {
-    "message": "Keep these sites in Edge"
+  "openVeloDrop": {
+    "message": "Open VeloDrop Settings"
   },
-  "settingsHint": {
-    "message": "One domain per line. Set the minimum to zero to include small files."
+  "settingsManaged": {
+    "message": "Settings are managed in VeloDrop"
   },
-  "browserNetwork": {
-    "message": "Reuse Edge session headers"
+  "takeoverOn": {
+    "message": "Takeover on"
   },
-  "browserNetworkHint": {
-    "message": "This requires site access. Session headers are only used for the current download."
+  "takeoverOff": {
+    "message": "Takeover off"
   },
-  "useEdgeForSite": {
-    "message": "Keep the current site in Edge"
+  "minimumShort": {
+    "message": "Min $SIZE$ MiB",
+    "placeholders": {
+      "size": { "content": "$1" }
+    }
+  },
+  "excludedShort": {
+    "message": "$COUNT$ sites kept in Edge",
+    "placeholders": {
+      "count": { "content": "$1" }
+    }
+  },
+  "excludedNone": {
+    "message": "No excluded sites"
   }
 }

@@ -12,6 +12,9 @@ struct VeloDropApp: App {
                 CommandGroup(replacing: .appSettings) {
                     Button("Settings…", action: lifecycle.openPreferences).keyboardShortcut(",")
                 }
+                CommandGroup(after: .appInfo) {
+                    Button("Check for Updates…", action: lifecycle.openUpdates)
+                }
                 CommandGroup(after: .windowArrangement) {
                     Button("Downloads", action: lifecycle.openDownloads)
                 }
@@ -71,9 +74,15 @@ final class AppLifecycle: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     func openProgress(_ id: UUID) {
         if progressWindows[id] == nil {
-            progressWindows[id] = makeWindow(title: String(localized: "Download Progress")) {
+            let window = makeWindow(title: String(localized: "Download Progress")) {
                 DownloadProgressView(id: id, model: model)
             }
+            // Stack simultaneous progress windows instead of hiding them
+            // exactly under each other.
+            let step = CGFloat(progressWindows.count % 5) * 26
+            window.setFrameOrigin(NSPoint(x: window.frame.origin.x + step,
+                                          y: window.frame.origin.y - step))
+            progressWindows[id] = window
         }
         present(progressWindows[id])
     }
@@ -97,6 +106,10 @@ final class AppLifecycle: NSObject, NSApplicationDelegate, NSWindowDelegate {
             return
         }
         NSApp.setActivationPolicy(.regular)
+        DistributedNotificationCenter.default().addObserver(
+            self, selector: #selector(openSettingsFromBridge),
+            name: Notification.Name("com.amayakite.velodrop.openSettings"), object: nil)
+        let settingsRequest = workspaceOpenSettingsRequest()
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         statusItem = item
         item.button?.target = self
@@ -114,7 +127,11 @@ final class AppLifecycle: NSObject, NSApplicationDelegate, NSWindowDelegate {
             }
             if self.model.confirmation != nil { self.showConfirmation() }
             self.model.showPendingIntake()
-            if !background && self.model.confirmation == nil {
+            if settingsRequest {
+                self.openDownloads()
+                self.openPreferences()
+                self.presentEdgeSettings()
+            } else if !background && self.model.confirmation == nil {
                 self.openDownloads()
                 if !UserDefaults.standard.bool(forKey: "welcomeCompleted") { self.openWelcome() }
             }
@@ -127,7 +144,36 @@ final class AppLifecycle: NSObject, NSApplicationDelegate, NSWindowDelegate {
         return false
     }
 
-    func applicationWillTerminate(_ notification: Notification) { model.shutdown() }
+    @objc private func openSettingsFromBridge() {
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            // The bridge only writes the flag when the app is not running; a
+            // running app can receive a stale one after an interrupted launch.
+            try? FileManager.default.removeItem(
+                at: self.model.workspace.root.appendingPathComponent("open-settings"))
+            self.openPreferences()
+            self.presentEdgeSettings()
+        }
+    }
+
+    private func presentEdgeSettings() {
+        // Let the settings hosting view subscribe before switching sections.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+            NotificationCenter.default.post(name: .velodropOpenEdgeSettings, object: nil)
+        }
+    }
+
+    private func workspaceOpenSettingsRequest() -> Bool {
+        let flag = model.workspace.root.appendingPathComponent("open-settings")
+        guard FileManager.default.fileExists(atPath: flag.path) else { return false }
+        try? FileManager.default.removeItem(at: flag)
+        return true
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        DistributedNotificationCenter.default().removeObserver(self)
+        model.shutdown()
+    }
 
     func windowWillClose(_ notification: Notification) {
         guard let window = notification.object as? NSWindow else { return }
@@ -152,6 +198,13 @@ final class AppLifecycle: NSObject, NSApplicationDelegate, NSWindowDelegate {
         present(welcomeWindow)
     }
 
+    func openUpdates() {
+        openPreferences()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+            NotificationCenter.default.post(name: .velodropCheckForUpdates, object: nil)
+        }
+    }
+
     func openPreferences() {
         if settingsWindow == nil {
             settingsWindow = makeWindow(title: String(localized: "VeloDrop Settings")) {
@@ -163,27 +216,59 @@ final class AppLifecycle: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     func openDownloads() {
         if downloadsWindow == nil {
-            downloadsWindow = makeWindow(title: "VeloDrop") {
+            downloadsWindow = makeWindow(title: "VeloDrop",
+                                         contentSize: NSSize(width: 1100, height: 728)) {
                 DownloadsPanel(model: model, inWindow: true, openPreferences: openPreferences, openDownloads: openDownloads)
                     .frame(minWidth: 820, minHeight: 540)
             }
             downloadsWindow?.styleMask.insert([.resizable, .fullSizeContentView])
             downloadsWindow?.titleVisibility = .hidden
             downloadsWindow?.titlebarAppearsTransparent = true
-            downloadsWindow?.setContentSize(NSSize(width: 1100, height: 728))
+            downloadsWindow?.contentMinSize = NSSize(width: 820, height: 540)
         }
         present(downloadsWindow)
     }
 
-    private func makeWindow<Content: View>(title: String, @ViewBuilder content: () -> Content) -> NSWindow {
-        let window = NSWindow(contentViewController: NSHostingController(rootView: content()))
+    private func makeWindow<Content: View>(title: String, contentSize: NSSize? = nil,
+                                          @ViewBuilder content: () -> Content) -> NSWindow {
+        let hosting = NSHostingController(rootView: content())
+        let window = NSWindow(contentViewController: hosting)
+
+        // SwiftUI does not have a usable fitting size until its hosting view has been
+        // laid out. Sizing and centering the window before that happens leaves a
+        // one-point window pinned to the top-right corner of the screen.
+        hosting.view.layoutSubtreeIfNeeded()
+        let fitted = hosting.view.fittingSize
+        if let contentSize {
+            window.setContentSize(contentSize)
+        } else if fitted.width > 1, fitted.height > 1 {
+            window.setContentSize(fitted)
+        }
+
         window.title = title
         window.styleMask = [.titled, .closable, .miniaturizable]
         window.isReleasedWhenClosed = false
         window.delegate = self
         window.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]
-        window.center()
+        window.tabbingMode = .disallowed
+        center(window, on: activeScreen())
         return window
+    }
+
+    private func activeScreen() -> NSScreen {
+        let mouse = NSEvent.mouseLocation
+        if let screen = NSScreen.screens.first(where: { NSMouseInRect(mouse, $0.frame, false) }) {
+            return screen
+        }
+        return NSApp.keyWindow?.screen ?? NSScreen.main ?? NSScreen.screens[0]
+    }
+
+    private func center(_ window: NSWindow, on screen: NSScreen) {
+        let visible = screen.visibleFrame
+        let size = window.frame.size
+        let origin = NSPoint(x: visible.midX - size.width / 2,
+                             y: visible.midY - size.height / 2)
+        window.setFrameOrigin(origin)
     }
 
     private func present(_ window: NSWindow?) {

@@ -89,15 +89,20 @@ struct PreferencesView: View {
     @Bindable var model: DownloadModel
     @State private var message: String?
     @State private var error = false
+    @State private var checkingUpdate = false
+    @State private var updateMessage: String?
     @State private var section: PreferencesSection = .general
     @State private var choosingFolder = false
     @State private var checkedAt: Date?
-    @State private var rules: BrowserRules?
     @AppStorage("deleteFilesByDefault") private var deleteFiles = true
     @AppStorage("playCompletionSound") private var playSound = false
 
     private var extensionFolder: URL {
         BundleLayout.browserExtension(in: Bundle.main.bundleURL)
+    }
+
+    private var currentVersion: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—"
     }
 
     var body: some View {
@@ -124,9 +129,20 @@ struct PreferencesView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
-        .frame(width: 680, height: 580)
+        .frame(width: 680, height: 660)
         .background(Color(nsColor: .windowBackgroundColor))
         .onAppear(perform: refreshConnection)
+        .onReceive(NotificationCenter.default.publisher(for: .velodropCheckForUpdates)) { _ in
+            section = .general
+            checkForUpdates()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .velodropOpenEdgeSettings)) { _ in
+            section = .edge
+            refreshConnection()
+        }
+        .onReceive(Timer.publish(every: 5, on: .main, in: .common).autoconnect()) { _ in
+            if section == .edge { refreshConnection() }
+        }
         .fileImporter(isPresented: $choosingFolder, allowedContentTypes: [.folder]) { result in
             do { model.defaultFolder = try result.get().path }
             catch { model.notice = error.localizedDescription }
@@ -237,6 +253,30 @@ struct PreferencesView: View {
                         .padding(.leading, 24)
                 }
             }
+            settingsCard("Application", symbol: "app.badge") {
+                VStack(alignment: .leading, spacing: 7) {
+                    HStack(spacing: 10) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("VeloDrop \(currentVersion)")
+                                .font(.system(size: 11, weight: .medium))
+                                .monospacedDigit()
+                            Text("Updates replace the running version and reopen the app automatically.")
+                                .font(.system(size: 9.5))
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Button(checkingUpdate ? "Checking…" : "Check for Updates…", action: checkForUpdates)
+                            .buttonStyle(VDSecondaryButtonStyle(compact: true))
+                            .disabled(checkingUpdate)
+                    }
+                    if let updateMessage {
+                        Text(updateMessage)
+                            .font(.system(size: 9.5))
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
         }
     }
 
@@ -333,39 +373,98 @@ struct PreferencesView: View {
 
     private var edge: some View {
         VStack(spacing: 12) {
-            HStack(spacing: 12) {
-                ZStack {
-                    Circle()
-                        .fill((checkedAt == nil ? VD.orange : VD.green).opacity(0.12))
-                        .frame(width: 42, height: 42)
-                    Image(systemName: "puzzlepiece.extension.fill")
-                        .font(.system(size: 17))
-                        .foregroundStyle(checkedAt == nil ? VD.orange : VD.green)
-                }
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(checkedAt == nil ? "Not Connected" : "Connected")
-                        .font(.system(size: 12.5, weight: .semibold))
-                    if let checkedAt {
-                        Text("Last connected \(Format.dateTime(checkedAt))")
-                            .font(.system(size: 9.5))
-                            .foregroundStyle(.secondary)
-                    } else {
-                        Text("No connection check received yet.")
-                            .font(.system(size: 9.5))
+            connectionCard
+
+            settingsCard("Browser Takeover", symbol: "hand.raised") {
+                VStack(spacing: 0) {
+                    toggleRow("Take over downloads from Edge", isOn: $model.browserTakeoverEnabled)
+                    Text("Ordinary files that match these rules are offered in VeloDrop instead of Edge.")
+                        .font(.system(size: 9.5))
+                        .foregroundStyle(.secondary)
+                        .padding(.leading, 24)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    Divider().overlay(VD.hairline).padding(.leading, 24)
+
+                    HStack(alignment: .center, spacing: 10) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Minimum file size")
+                                .font(.system(size: 11))
+                            Text("Smaller files stay in Edge.")
+                                .font(.system(size: 9.5))
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        TextField("", value: $model.browserMinimumMiB,
+                                  format: .number.precision(.fractionLength(0...2)))
+                            .textFieldStyle(.roundedBorder)
+                            .multilineTextAlignment(.trailing)
+                            .frame(width: 64)
+                            .onChange(of: model.browserMinimumMiB) { _, value in
+                                if value < 0 { model.browserMinimumMiB = 0 }
+                                if value > 10_240 { model.browserMinimumMiB = 10_240 }
+                            }
+                        Text("MiB")
+                            .font(.system(size: 10.5))
                             .foregroundStyle(.secondary)
                     }
-                }
-                Spacer()
-                Button("Refresh Connection", action: refreshConnection)
-                    .buttonStyle(VDSecondaryButtonStyle(compact: true))
-            }
-            .vdCard(padding: 12)
+                    .padding(.vertical, 7)
 
-            settingsCard("Connect Microsoft Edge", symbol: "link") {
+                    Divider().overlay(VD.hairline).padding(.leading, 24)
+
+                    toggleRow("Reuse Edge session headers", isOn: $model.browserReuseSessionHeaders)
+                    Text("Only the accepted download may use its cookies and request headers. Redirects never receive them.")
+                        .font(.system(size: 9.5))
+                        .foregroundStyle(.secondary)
+                        .padding(.leading, 24)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    Divider().overlay(VD.hairline).padding(.leading, 24)
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack(spacing: 4) {
+                            Text("Keep these sites in Edge")
+                                .font(.system(size: 11))
+                            Spacer()
+                            if excludedHostCount > 0 {
+                                Text("\(excludedHostCount) sites")
+                                    .font(.system(size: 9.5))
+                                    .foregroundStyle(.tertiary)
+                            }
+                        }
+                        TextEditor(text: $model.browserExcludedHosts)
+                            .font(.system(size: 10.5, design: .monospaced))
+                            .scrollContentBackground(.hidden)
+                            .padding(6)
+                            .frame(height: 58)
+                            .background(Color.primary.opacity(0.035),
+                                        in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                    .strokeBorder(VD.hairline, lineWidth: 0.8)
+                            )
+                        Text("One domain per line. Rules check the download URL, the final URL, and the page that started it.")
+                            .font(.system(size: 9.5))
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .padding(.top, 7)
+                }
+            }
+
+            settingsCard("Edge Bridge", symbol: "link") {
                 VStack(alignment: .leading, spacing: 11) {
-                    step(1, "Set Up Edge opens the extensions page and copies the extension folder path.")
+                    Text("The Edge extension is only a bridge. It has no settings of its own; everything is managed here.")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    step(1, "Choose Set Up Edge. VeloDrop registers the connector, copies the extension folder path, and opens Edge.")
                     step(2, "Turn on Developer mode in Edge and choose Load unpacked. In the folder picker, press ⇧⌘G, paste the path, press Return, then choose Select Folder.")
-                    step(3, "Open the VeloDrop extension in Edge, then check the connection here.")
+                    step(3, "That is all. The toolbar icon only shows the bridge status, and the connection appears above.")
+                    Text("After updating VeloDrop, reload the extension once in Edge to use the new bridge UI.")
+                        .font(.system(size: 9.5))
+                        .foregroundStyle(.tertiary)
+                        .fixedSize(horizontal: false, vertical: true)
                     HStack(spacing: 8) {
                         Button("Set Up Edge…", action: install)
                             .buttonStyle(VDPrimaryButtonStyle(compact: true))
@@ -378,28 +477,6 @@ struct PreferencesView: View {
                 }
             }
 
-            settingsCard("Browser Rules", symbol: "slider.horizontal.3") {
-                if let rules {
-                    VStack(spacing: 0) {
-                        ruleRow("Take over downloads", rules.enabled ? String(localized: "Enabled") : String(localized: "Disabled"),
-                                tint: rules.enabled ? VD.green : .secondary)
-                        Divider().overlay(VD.hairline)
-                        ruleRow("Minimum file size", "\(rules.minimumMiB.formatted()) MiB")
-                        Divider().overlay(VD.hairline)
-                        ruleRow("Excluded websites", rules.excludedHosts.isEmpty ? String(localized: "None") : rules.excludedHosts)
-                    }
-                    Text("Change these rules in the VeloDrop extension, then refresh here.")
-                        .font(.system(size: 9.5))
-                        .foregroundStyle(.secondary)
-                        .padding(.top, 7)
-                } else {
-                    Text("Open the VeloDrop extension in Edge to check its connection and set excluded websites and minimum file size.")
-                        .font(.system(size: 10))
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-
             HStack(spacing: 8) {
                 Button("Open Extensions") { openEdge("edge://extensions/") }
                     .buttonStyle(VDSecondaryButtonStyle(compact: true))
@@ -408,6 +485,43 @@ struct PreferencesView: View {
                 Spacer()
             }
         }
+    }
+
+    private var connectionCard: some View {
+        HStack(spacing: 12) {
+            ZStack {
+                Circle()
+                    .fill((checkedAt == nil ? VD.orange : VD.green).opacity(0.12))
+                    .frame(width: 42, height: 42)
+                Image(systemName: "puzzlepiece.extension.fill")
+                    .font(.system(size: 17))
+                    .foregroundStyle(checkedAt == nil ? VD.orange : VD.green)
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                Text(checkedAt == nil ? "Not Connected" : "Connected")
+                    .font(.system(size: 12.5, weight: .semibold))
+                if let checkedAt {
+                    Text("Last connected \(Format.dateTime(checkedAt))")
+                        .font(.system(size: 9.5))
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text("No connection check received yet.")
+                        .font(.system(size: 9.5))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Spacer()
+            Button("Refresh Connection", action: refreshConnection)
+                .buttonStyle(VDSecondaryButtonStyle(compact: true))
+        }
+        .vdCard(padding: 12)
+    }
+
+    private var excludedHostCount: Int {
+        model.browserExcludedHosts
+            .split(whereSeparator: { $0.isWhitespace || $0 == "," || $0 == ";" })
+            .filter { !$0.isEmpty }
+            .count
     }
 
     private func settingsCard<Content: View>(_ title: LocalizedStringKey, symbol: String,
@@ -435,21 +549,6 @@ struct PreferencesView: View {
         .padding(.vertical, 4)
     }
 
-    private func ruleRow(_ title: LocalizedStringKey, _ value: String, tint: Color = .secondary) -> some View {
-        HStack(spacing: 10) {
-            Text(title)
-                .font(.system(size: 10.5))
-                .foregroundStyle(.secondary)
-            Spacer()
-            Text(value)
-                .font(.system(size: 10.5, weight: .medium))
-                .foregroundStyle(tint)
-                .lineLimit(2)
-                .multilineTextAlignment(.trailing)
-        }
-        .padding(.vertical, 4)
-    }
-
     private func step(_ number: Int, _ text: LocalizedStringKey) -> some View {
         HStack(alignment: .top, spacing: 8) {
             Text("\(number)")
@@ -466,8 +565,48 @@ struct PreferencesView: View {
 
     private func refreshConnection() {
         checkedAt = model.lastBrowserConnection
-        if let data = try? Data(contentsOf: model.workspace.root.appendingPathComponent("browser-rules.json")) {
-            rules = try? JSONDecoder().decode(BrowserRules.self, from: data)
+    }
+
+    private func checkForUpdates() {
+        guard !checkingUpdate else { return }
+        checkingUpdate = true
+        updateMessage = String(localized: "Checking for updates…")
+        Task {
+            do {
+                let release = try await UpdateChecker.latest()
+                checkingUpdate = false
+                updateMessage = nil
+                guard UpdateChecker.isNewer(release.version, than: currentVersion) else {
+                    let alert = NSAlert()
+                    alert.messageText = String(localized: "You’re up to date")
+                    alert.informativeText = String(localized: "VeloDrop \(currentVersion) is the newest version.")
+                    alert.addButton(withTitle: String(localized: "OK"))
+                    alert.runModal()
+                    return
+                }
+
+                let alert = NSAlert()
+                alert.messageText = String(localized: "VeloDrop \(release.version) is available")
+                alert.informativeText = String(localized: "VeloDrop will quit, replace the old version, and reopen automatically.")
+                alert.addButton(withTitle: String(localized: "Download and Install"))
+                alert.addButton(withTitle: String(localized: "Release Notes"))
+                alert.addButton(withTitle: String(localized: "Later"))
+                switch alert.runModal() {
+                case .alertFirstButtonReturn:
+                    checkingUpdate = true
+                    updateMessage = String(localized: "Downloading VeloDrop \(release.version)…")
+                    try await UpdateInstaller.downloadAndOpen(release)
+                    updateMessage = String(localized: "Opening the installer…")
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { NSApp.terminate(nil) }
+                case .alertSecondButtonReturn:
+                    NSWorkspace.shared.open(release.pageURL)
+                default:
+                    break
+                }
+            } catch {
+                checkingUpdate = false
+                updateMessage = error.localizedDescription
+            }
         }
     }
 

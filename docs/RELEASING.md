@@ -32,6 +32,7 @@ VeloDrop 使用 GitHub Actions 做两件事：
    Scripts/package.sh .dist
    hdiutil verify .dist/VeloDrop-*.dmg
    codesign --verify --deep --strict .dist/VeloDrop.app
+   codesign --verify --deep --strict ".dist/Install VeloDrop.app"
    ```
 
 4. 提交并推送 main：
@@ -62,8 +63,11 @@ VeloDrop 使用 GitHub Actions 做两件事：
 ## 构建产物
 
 - `.dist/VeloDrop-<version>-macos-arm64.dmg`
+- `.dist/VeloDrop.app` 和 `.dist/Install VeloDrop.app`（本地构建产物，DMG 内只有安装器）
 - `.dist/SHA256SUMS.txt`
 - Actions artifact：`VeloDrop-<version>-build-<run_number>`（CI）或 `VeloDrop-<version>-release`（Release）
+
+DMG 打开后显示「Install VeloDrop」。安装器会退出正在运行的旧版本、把应用原位替换到「应用程序」，然后重新打开。安装器的 Payload 位于 `Install VeloDrop.app/Contents/Resources/Payload/VeloDrop.app`。
 
 GitHub 托管 runner 的 `macos-15` 标签当前是 arm64。工作流依赖 `uname -m` 生成架构后缀；如果未来 GitHub 调整 runner 标签，需要同步修改两个 workflow 的 `runs-on`，避免产出错误架构的安装包。
 
@@ -81,4 +85,4 @@ GitHub 托管 runner 的 `macos-15` 标签当前是 arm64。工作流依赖 `una
 - **Release 创建失败**：检查仓库 Settings → Actions → General → Workflow permissions 是否允许 GitHub Actions 写入内容；workflow 已声明 `permissions: contents: write`，但组织策略仍可能覆盖。
 - **tag 和版本不一致**：修改 manifest 后重新打 tag；不要复用已推送的版本 tag。
 - **DMG 构建失败**：先看 `build-engine.sh` 的 aria2 下载校验；缓存在 `.build/engine-*`，必要时在 Actions 页面清除 cache 后重跑。
-- **首次打开被 macOS 拦截**：这是 ad-hoc 签名和未公证的预期行为，在 Finder 中右键 VeloDrop.app 选择「打开」。
+- **首次打开被 macOS 拦截**：这是 ad-hoc 签名和未公证的预期行为，在 Finder 中右键「Install VeloDrop.app」选择「打开」。安装完成后打开的是已签名的 VeloDrop.app。

@@ -156,7 +156,7 @@
 "Open Extensions" = "打开扩展管理";
 "Open Settings, select Microsoft Edge, and follow the extension setup steps." = "打开设置，选择 Microsoft Edge，然后按步骤安装扩展。";
 "Open the VeloDrop extension in Edge to check its connection and set excluded websites and minimum file size." = "在 Edge 中打开 VeloDrop 扩展，可检查连接、设置不接管的网站及最小文件大小。";
-"Open the VeloDrop extension in Edge, then check the connection here." = "在 Edge 中打开 VeloDrop 扩展，然后回到这里检查连接。";
+"The bridge checks in automatically after Edge loads the extension." = "Edge 加载扩展后，桥接会自动向这里报告连接。";
 "Other downloads are waiting for confirmation." = "还有其他下载等待确认，处理后将依次显示。";
 "Paste" = "粘贴";
 "Paste one HTTP or HTTPS link per line." = "粘贴 HTTP 或 HTTPS 链接，每行一个。";
@@ -243,3 +243,38 @@
 
 "Pause All" = "全部暂停";
 "Resume All" = "全部继续";
+
+"Application" = "应用程序";
+"Updates replace the running version and reopen the app automatically." = "更新会替换正在运行的版本，并自动重新打开应用。";
+"Check for Updates…" = "检查更新…";
+"Checking…" = "正在检查…";
+"VeloDrop %@" = "VeloDrop %@";
+"Take over downloads from Edge" = "接管 Edge 下载";
+"Ordinary files that match these rules are offered in VeloDrop instead of Edge." = "符合规则的普通文件会改为在 VeloDrop 中确认下载。";
+"Smaller files stay in Edge." = "更小的文件继续由 Edge 下载。";
+"Reuse Edge session headers" = "沿用 Edge 会话请求头";
+"Only the accepted download may use its cookies and request headers. Redirects never receive them." = "仅被接管的下载可以使用其 Cookie 和请求头，重定向后的地址不会收到这些内容。";
+"Keep these sites in Edge" = "这些网站继续用 Edge 下载";
+"%lld sites" = "%lld 个网站";
+"One domain per line. Rules check the download URL, the final URL, and the page that started it." = "每行一个域名。规则会检查下载地址、最终地址和来源页面。";
+"Edge Bridge" = "Edge 桥接";
+"The Edge extension is only a bridge. It has no settings of its own; everything is managed here." = "Edge 扩展只负责桥接，没有自己的设置；所有配置都在这里管理。";
+"Choose Set Up Edge. VeloDrop registers the connector, copies the extension folder path, and opens Edge." = "点击「配置 Edge」。VeloDrop 会注册连接器、复制扩展文件夹路径并打开 Edge。";
+"That is all. The toolbar icon only shows the bridge status, and the connection appears above." = "完成。工具栏图标只显示桥接状态，连接情况会显示在上方。";
+"After updating VeloDrop, reload the extension once in Edge to use the new bridge UI." = "更新 VeloDrop 后，请在 Edge 扩展页重新加载一次，以使用新的桥接界面。";
+"The update server returned an unexpected response." = "更新服务器返回了意外响应。";
+"This release does not include a VeloDrop disk image." = "此版本没有提供 VeloDrop 磁盘映像。";
+"Couldn’t open the downloaded disk image. %@" = "无法打开下载的磁盘映像。%@";
+"The installer app is missing." = "安装程序缺失。";
+"Checking for updates…" = "正在检查更新…";
+"You’re up to date" = "已是最新版本";
+"VeloDrop %@ is the newest version." = "VeloDrop %@ 已是最新版本。";
+"OK" = "好";
+"VeloDrop %@ is available" = "VeloDrop %@ 可供更新";
+"VeloDrop will quit, replace the old version, and reopen automatically." = "VeloDrop 会退出、替换旧版本并自动重新打开。";
+"Download and Install" = "下载并安装";
+"Release Notes" = "版本说明";
+"Later" = "稍后";
+"Downloading VeloDrop %@…" = "正在下载 VeloDrop %@…";
+"Opening the installer…" = "正在打开安装程序…";
+"Couldn’t save the browser rules. %@" = "无法保存浏览器规则。%@";

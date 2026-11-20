@@ -11,8 +11,8 @@ build_number="${VELODROP_BUILD_NUMBER:-$(git rev-list --count HEAD 2>/dev/null |
 dmg="VeloDrop-$version-macos-$(uname -m).dmg"
 
 "$root/Scripts/build-engine.sh"
-swift build -c release
-bin="$(swift build -c release --show-bin-path)"
+swift build -c release --disable-sandbox
+bin="$(swift build -c release --disable-sandbox --show-bin-path)"
 assets="$root/.build/velodrop-assets"
 swift Scripts/render-icon.swift "$assets"
 iconutil -c icns "$assets/AppIcon.iconset" -o "$assets/AppIcon.icns"
@@ -22,7 +22,9 @@ tmp="$(mktemp -d "$out/.velodrop.XXXXXX")"
 trap 'rm -rf "$tmp"' EXIT
 volume="$tmp/volume"
 mkdir -p "$volume"
-staged="$volume/VeloDrop.app"
+# Stage the app outside the disk image. Only the installer is published in
+# the volume, so there is no drag target that can hit the in-use error.
+staged="$tmp/VeloDrop.app"
 contents="$staged/Contents"
 resources="$contents/Resources"
 mkdir -p "$contents/MacOS" "$contents/Helpers" "$resources/EdgeExtension" "$resources/Notices"
@@ -64,10 +66,49 @@ codesign "${flags[@]}" "$contents/Helpers/aria2c"
 codesign "${flags[@]}" "$contents/Helpers/VeloBridge"
 codesign "${flags[@]}" "$staged"
 codesign --verify --deep --strict "$staged"
-ln -s /Applications "$volume/Applications"
-hdiutil create -volname "VeloDrop $version" -fs HFS+ -format UDZO -srcfolder "$volume" "$tmp/$dmg"
+
+# The disk image opens with a tiny installer instead of a drag target. It can
+# quit a running copy, replace the app bundle, and relaunch in one step, which
+# avoids Finder's "VeloDrop is in use" failure during upgrades.
+installer="$volume/Install VeloDrop.app"
+icontents="$installer/Contents"
+iresources="$icontents/Resources"
+mkdir -p "$icontents/MacOS" "$iresources/Payload"
+cp "$bin/VeloDropInstaller" "$icontents/MacOS/"
+cp "$assets/AppIcon.icns" "$iresources/"
+cp -R "$staged" "$iresources/Payload/VeloDrop.app"
+cat > "$icontents/Info.plist" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "https://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleIdentifier</key><string>com.amayakite.velodrop.installer</string>
+    <key>CFBundleDevelopmentRegion</key><string>en</string>
+    <key>CFBundleLocalizations</key><array><string>en</string><string>zh-Hans</string></array>
+    <key>CFBundleName</key><string>Install VeloDrop</string>
+    <key>CFBundleDisplayName</key><string>Install VeloDrop</string>
+    <key>CFBundleExecutable</key><string>VeloDropInstaller</string>
+    <key>CFBundleIconFile</key><string>AppIcon</string>
+    <key>CFBundlePackageType</key><string>APPL</string>
+    <key>CFBundleShortVersionString</key><string>$version</string>
+    <key>CFBundleVersion</key><string>$build_number</string>
+    <key>LSMinimumSystemVersion</key><string>14.0</string>
+    <key>NSHighResolutionCapable</key><true/>
+</dict>
+</plist>
+PLIST
+if [[ "$identity" == "-" ]]; then
+    codesign --force --deep --sign - "$installer"
+else
+    codesign --force --deep --options runtime --timestamp --sign "$identity" "$installer"
+fi
+codesign --verify --deep --strict "$installer"
+
+hdiutil create -volname "Install VeloDrop $version" -fs HFS+ -format UDZO -srcfolder "$volume" "$tmp/$dmg"
 hdiutil verify "$tmp/$dmg"
 if [[ -e "$app" ]]; then rm -rf "$app"; fi
+if [[ -e "$out/Install VeloDrop.app" ]]; then rm -rf "$out/Install VeloDrop.app"; fi
 mv "$staged" "$app"
+cp -R "$installer" "$out/Install VeloDrop.app"
 mv -f "$tmp/$dmg" "$out/$dmg"
 printf '%s\n' "$out/$dmg"

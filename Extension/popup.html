@@ -5,19 +5,25 @@
 <title>VeloDrop</title>
 <link rel="stylesheet" href="popup.css">
 <header>
-  <img src="Icon48.png" alt="" width="36" height="36">
-  <div><h1>VeloDrop</h1><p id="status" role="status" data-message="checkingConnection"></p></div>
+  <img src="Icon48.png" alt="" width="38" height="38">
+  <div>
+    <h1>VeloDrop</h1>
+    <p id="status" role="status" data-message="checkingConnection"></p>
+  </div>
 </header>
 <main>
-  <label class="switch"><span data-message="autoTakeover"></span><input id="enabled" type="checkbox"></label>
-  <label class="switch"><span data-message="browserNetwork"></span><input id="browser-network" type="checkbox"></label>
-  <p class="hint" data-message="browserNetworkHint"></p>
-  <label for="minimum" data-message="minimumSize"></label>
-  <div class="number"><input id="minimum" type="number" min="0" max="10240" step="1"><span>MiB</span></div>
-  <label for="hosts" data-message="excludedHosts"></label>
-  <textarea id="hosts" rows="2" placeholder="example.com" spellcheck="false"></textarea>
-  <p class="hint" data-message="settingsHint"></p>
-  <button id="add-site" type="button" data-message="useEdgeForSite" hidden></button>
+  <p class="lede" data-message="bridgeOnly"></p>
+  <div id="summary" class="summary" hidden>
+    <span id="takeover"></span>
+    <span id="minimum"></span>
+    <span id="excluded"></span>
+  </div>
+  <p class="hint" data-message="bridgeHint"></p>
+  <button id="open" type="button" data-message="openVeloDrop" disabled></button>
 </main>
+<footer>
+  <span id="version"></span>
+  <span data-message="settingsManaged"></span>
+</footer>
 <script type="module" src="popup.js"></script>
 </html>

@@ -6,10 +6,10 @@ const allowedHeaders = new Set(["accept", "accept-language", "user-agent", "refe
 const recent = new Map();
 const maxAge = 15_000;
 
-export function observeBrowserRequests() {
+export function observeBrowserRequests(reuseEnabled = () => true) {
   if (!chrome.webRequest) return;
   const capture = request => {
-    if (request.tabId < 0) return;
+    if (!reuseEnabled() || request.tabId < 0) return;
     const fields = Object.fromEntries((request.requestHeaders ?? [])
       .filter(header => allowedHeaders.has(header.name.toLowerCase()) && typeof header.value === "string")
       .map(header => [header.name.toLowerCase(), header.value]));
@@ -104,8 +104,8 @@ async function browserProxy(url) {
   return { mode: "fixed", endpoint };
 }
 
-export async function requestContext(item, url) {
-  const granted = await chrome.permissions.contains(networkPermissions);
+export async function requestContext(item, url, reuseHeaders = true) {
+  const granted = reuseHeaders && await chrome.permissions.contains(networkPermissions);
   const final = granted ? takeRecent(url.href) : undefined;
   const initial = item.url === url.href ? final : (granted ? takeRecent(item.url) : undefined);
   if (final?.ambiguous || initial?.ambiguous ||

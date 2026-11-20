@@ -14,13 +14,14 @@ private struct Request: Codable {
     var mimeType: String?
     var headers: [String: String]?
     var proxy: BrowserProxy?
-    var rules: BrowserRules?
 }
 
 private struct Reply: Encodable {
     let ok: Bool
     var jobs: [String: Workspace.BrowserStatus]?
     var appRunning: Bool?
+    var rules: BrowserRules?
+    var version: String?
 }
 
 private func handle(_ data: Data, bundle: URL) throws -> Reply {
@@ -29,15 +30,16 @@ private func handle(_ data: Data, bundle: URL) throws -> Reply {
     try workspace.prepare()
 
     switch request.action {
-    case "ping":
-        if let rules = request.rules, rules.minimumMiB.isFinite, rules.minimumMiB >= 0,
-           rules.excludedHosts.utf8.count <= 32768 {
-            try JSONEncoder().encode(rules).write(to: workspace.root.appendingPathComponent("browser-rules.json"), options: .atomic)
+    case "ping", "rules":
+        if request.action == "ping" {
+            try Data(String(Date().timeIntervalSince1970).utf8)
+                .write(to: workspace.root.appendingPathComponent("browser-connection"), options: .atomic)
         }
-        try Data(String(Date().timeIntervalSince1970).utf8)
-            .write(to: workspace.root.appendingPathComponent("browser-connection"), options: .atomic)
         let engine = BundleLayout.engine(in: bundle)
-        return Reply(ok: FileManager.default.isExecutableFile(atPath: engine.path))
+        return Reply(ok: FileManager.default.isExecutableFile(atPath: engine.path),
+                     appRunning: workspace.appIsRunning,
+                     rules: currentRules(in: workspace),
+                     version: appVersion(of: bundle))
 
     case "submit", "reserve":
         guard let id = request.id, let url = request.url, let name = request.name,
@@ -90,6 +92,17 @@ private func handle(_ data: Data, bundle: URL) throws -> Reply {
         }
         return Reply(ok: true, jobs: statuses, appRunning: workspace.appIsRunning)
 
+    case "open":
+        // Write the flag for a copy that is still launching, and notify a copy
+        // that is already running. The app consumes and removes the flag in both
+        // paths, so it cannot leak into an unrelated launch.
+        try? Data().write(to: workspace.root.appendingPathComponent("open-settings"), options: .atomic)
+        DistributedNotificationCenter.default().post(
+            name: Notification.Name("com.amayakite.velodrop.openSettings"), object: nil, userInfo: nil)
+        do { try launch(bundle, background: false) }
+        catch { return Reply(ok: false) }
+        return Reply(ok: true)
+
     case "acknowledge":
         guard let id = request.id else { return Reply(ok: false) }
         workspace.acknowledge(id)
@@ -105,17 +118,35 @@ private func handle(_ data: Data, bundle: URL) throws -> Reply {
     }
 }
 
-private func launch(_ bundle: URL) throws {
+private func currentRules(in workspace: Workspace) -> BrowserRules {
+    guard let data = try? Data(contentsOf: workspace.root.appendingPathComponent("browser-rules.json")),
+          let rules = try? JSONDecoder().decode(BrowserRules.self, from: data) else {
+        return BrowserRules()
+    }
+    return rules
+}
+
+private func appVersion(of bundle: URL) -> String? {
+    Bundle(url: bundle)?.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+}
+
+private func launch(_ bundle: URL, background: Bool = true) throws {
     if ProcessInfo.processInfo.environment["VELODROP_TEST_NO_LAUNCH"] == "1" { return }
     let identifier = Bundle(url: bundle)?.bundleIdentifier ?? BundleLayout.identifier
-    if !NSRunningApplication.runningApplications(withBundleIdentifier: identifier).isEmpty { return }
+    if !NSRunningApplication.runningApplications(withBundleIdentifier: identifier).isEmpty {
+        // The app decides when a capture should take focus. Activating here
+        // would pull Edge to the background for every ordinary download.
+        return
+    }
     let process = Process()
     process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
     let environment = ProcessInfo.processInfo.environment
     let dataOverrides = ["VELODROP_DATA", "VELODROP_DESTINATION"].flatMap { key in
         environment[key].map { ["--env", "\(key)=\($0)"] } ?? []
     }
-    process.arguments = ["-a", bundle.path, "--env", "VELODROP_BACKGROUND_LAUNCH=1"] + dataOverrides
+    var args = ["-a", bundle.path]
+    if background { args += ["--env", "VELODROP_BACKGROUND_LAUNCH=1"] }
+    process.arguments = args + dataOverrides
     process.standardInput = FileHandle.nullDevice
     process.standardOutput = FileHandle.nullDevice
     process.standardError = FileHandle.nullDevice

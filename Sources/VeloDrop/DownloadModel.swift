@@ -34,6 +34,32 @@ final class DownloadModel {
     var showWindowOnCapture: Bool {
         didSet { UserDefaults.standard.set(showWindowOnCapture, forKey: "showWindowOnCapture") }
     }
+
+    // Browser takeover rules live in the app. The Edge extension only asks for
+    // them through VeloBridge, so users have one place to configure downloads.
+    var browserTakeoverEnabled: Bool {
+        didSet { persistBrowserRules() }
+    }
+    var browserMinimumMiB: Double {
+        didSet { persistBrowserRules() }
+    }
+    var browserExcludedHosts: String {
+        didSet { persistBrowserRules() }
+    }
+    var browserReuseSessionHeaders: Bool {
+        didSet { persistBrowserRules() }
+    }
+
+    var browserRules: BrowserRules {
+        BrowserRules(enabled: browserTakeoverEnabled,
+                     minimumMiB: Self.clampedMinimum(browserMinimumMiB),
+                     excludedHosts: browserExcludedHosts,
+                     reuseSessionHeaders: browserReuseSessionHeaders)
+    }
+
+    private static func clampedMinimum(_ value: Double) -> Double {
+        value.isFinite ? min(max(value, 0), 10_240) : 2
+    }
     private(set) var confirmation: Transfer? {
         didSet { onConfirmationChanged?() }
     }
@@ -68,6 +94,20 @@ final class DownloadModel {
             ? true : UserDefaults.standard.bool(forKey: "confirmBrowserDownloads")
         showWindowOnCapture = UserDefaults.standard.object(forKey: "showWindowOnCapture") as? Bool ?? true
 
+        // VeloDrop 0.5 stored these rules in the extension. Use the last synced
+        // copy as the migration source until the user edits them in Settings.
+        let legacyRules = (try? Data(contentsOf: workspace.root.appendingPathComponent("browser-rules.json")))
+            .flatMap { try? JSONDecoder().decode(BrowserRules.self, from: $0) }
+        let defaults = UserDefaults.standard
+        browserTakeoverEnabled = defaults.object(forKey: "browserTakeoverEnabled") as? Bool
+            ?? legacyRules?.enabled ?? true
+        browserMinimumMiB = Self.clampedMinimum(defaults.object(forKey: "browserMinimumMiB") as? Double
+            ?? legacyRules?.minimumMiB ?? 2)
+        browserExcludedHosts = defaults.string(forKey: "browserExcludedHosts")
+            ?? legacyRules?.excludedHosts ?? ""
+        browserReuseSessionHeaders = defaults.object(forKey: "browserReuseSessionHeaders") as? Bool
+            ?? legacyRules?.reuseSessionHeaders ?? false
+
         do {
             try workspace.prepare()
             lockDescriptor = open(workspace.root.appendingPathComponent("app.lock").path, O_CREAT | O_RDWR, 0o600)
@@ -79,6 +119,7 @@ final class DownloadModel {
                 return
             }
             workspace.expireOldOutcomes()
+            persistBrowserRules()
             transfers = workspace.all()
             for var transfer in transfers where transfer.state.running || transfer.state == .paused {
                 if let output = workspace.recoveredOutput(transfer) {
@@ -97,6 +138,16 @@ final class DownloadModel {
             confirmNextIfNeeded()
         } catch {
             notice = error.localizedDescription
+        }
+    }
+
+    private func persistBrowserRules() {
+        guard lockDescriptor >= 0 else { return }
+        do {
+            let data = try JSONEncoder().encode(browserRules)
+            try data.write(to: workspace.root.appendingPathComponent("browser-rules.json"), options: .atomic)
+        } catch {
+            notice = String(localized: "Couldn’t save the browser rules. \(error.localizedDescription)")
         }
     }
 
