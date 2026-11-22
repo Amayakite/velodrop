@@ -149,7 +149,7 @@ struct WelcomeView: View {
                     .font(.system(size: 10.5))
                     .foregroundStyle(.secondary)
                 Button("Test Download in Browser") {
-                    guard let browser = ChromiumBrowser.firstInstalled?.appURL,
+                    guard let browser = SupportedBrowser.firstInstalled?.appURL,
                           let url = URL(string: "https://speed.cloudflare.com/__down?bytes=3145728") else { return }
                     NSWorkspace.shared.open([url], withApplicationAt: browser,
                                             configuration: NSWorkspace.OpenConfiguration())

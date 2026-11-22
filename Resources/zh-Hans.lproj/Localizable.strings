@@ -229,7 +229,7 @@
 "A faster, friendlier download manager for your Mac." = "更快、更顺手的 Mac 下载管理器。";
 "Choose where files are saved and what happens after a download." = "选择文件保存位置，以及下载完成后的行为。";
 "Control the queue, connections, and browser confirmations." = "控制下载队列、连接数和浏览器下载确认。";
-"Connect the VeloDrop extension to Chrome, Edge, Brave, or Vivaldi and review takeover rules." = "连接 Chrome、Edge、Brave 或 Vivaldi 中的扩展，并查看接管规则。";
+"Connect the VeloDrop extension to Chrome, Edge, Brave, Vivaldi, or Firefox and review takeover rules." = "连接 Chrome、Edge、Brave、Vivaldi 或 Firefox 中的扩展，并查看接管规则。";
 "Set a global bandwidth limit and review proxy behavior." = "设置全局带宽上限，并查看代理方式。";
 
 "%lld active" = "%lld 个任务";
@@ -277,6 +277,12 @@
 "Connector ready" = "连接器已就绪";
 "Connector not set up" = "连接器尚未配置";
 "Not installed" = "未安装";
-"Works with Chrome, Edge, Brave, and Vivaldi." = "支持 Chrome、Edge、Brave 和 Vivaldi。";
+"Works with Chrome, Edge, Brave, Vivaldi, and Firefox." = "支持 Chrome、Edge、Brave、Vivaldi 和 Firefox。";
 "Browser connector installed. Load the extension in each browser you want to use." = "连接器已安装。请在要使用的浏览器中加载扩展。";
-"No supported browser was found. Install Chrome, Edge, Brave, or Vivaldi first." = "未找到受支持的浏览器。请先安装 Chrome、Edge、Brave 或 Vivaldi。";
+"No supported browser was found. Install Chrome, Edge, Brave, Vivaldi, or Firefox first." = "未找到受支持的浏览器。请先安装 Chrome、Edge、Brave、Vivaldi 或 Firefox。";
+
+"Load in Firefox" = "在 Firefox 中加载";
+"Chrome, Edge, Brave, Vivaldi: turn on Developer mode, choose Load unpacked, and select the copied folder." = "Chrome、Edge、Brave、Vivaldi：启用「开发人员模式」，点击「加载解压缩的扩展」，选择刚才复制的文件夹。";
+"Firefox: click Load in Firefox, then choose Load Temporary Add-on in about:debugging and select the copied manifest.json." = "Firefox：点击「在 Firefox 中加载」，在 about:debugging 中选择「临时载入附加组件」，再选择刚才复制的 manifest.json。";
+"Firefox removes temporary add-ons when it restarts. Sign the extension to keep it installed permanently." = "Firefox 重启后会移除临时附加组件。需要长期使用请对扩展签名。";
+"Firefox manifest path copied. In about:debugging, choose Load Temporary Add-on and select manifest.json." = "已复制 Firefox 清单路径。请在 about:debugging 中选择「临时载入附加组件」，再选择 manifest.json。";

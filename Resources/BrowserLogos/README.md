@@ -8,3 +8,4 @@ each browser in VeloDrop's settings.
 - `edge.png`: Microsoft Edge logo (2019), Wikimedia Commons
 - `brave.png`: Brave lion icon, Wikimedia Commons
 - `vivaldi.png`: Vivaldi browser logo, Wikimedia Commons
+- `firefox.png`: Firefox logo (2019), Wikimedia Commons

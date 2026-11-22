@@ -2,17 +2,18 @@
 
 [![CI](https://github.com/Amayakite/velodrop/actions/workflows/ci.yml/badge.svg)](https://github.com/Amayakite/velodrop/actions/workflows/ci.yml)
 
-VeloDrop 是一款原生 macOS 下载器。菜单栏图标打开下载窗口，也可通过 Dock 或 ⌘Tab 切回应用。Chrome、Edge、Brave 和 Vivaldi 可以自动把普通文件下载交给 VeloDrop。
+VeloDrop 是一款原生 macOS 下载器。菜单栏图标打开下载窗口，也可通过 Dock 或 ⌘Tab 切回应用。Chrome、Edge、Brave、Vivaldi 和 Firefox 可以自动把普通文件下载交给 VeloDrop。
 
 ## 安装
 
 1. 从 [GitHub Releases](https://github.com/Amayakite/velodrop/releases) 下载 DMG，双击打开，再双击「Install VeloDrop」。安装器会自动退出正在运行的旧版本、原位替换「应用程序」里的 VeloDrop 并重新打开，升级时不需要先手动退出旧版本。现成安装包适用于 Apple 芯片和 macOS 14 或更新版本。
 2. 打开 VeloDrop 后，会显示下载窗口。点击「浏览器设置」或设置齿轮，在「浏览器」页点击「配置浏览器」。VeloDrop 会为已安装的浏览器注册连接器、打开扩展页，并复制扩展文件夹路径。
-3. 在浏览器打开「开发人员模式」，点击「加载解压缩的扩展」，在选择文件夹窗口按 **⇧⌘G**，粘贴路径并按回车，再点击「选择文件夹」。多个浏览器可以共用同一个扩展文件夹。设置里也可以单独复制路径或在访达中显示扩展文件夹。工具栏图标只显示桥接状态；接管开关、最小文件大小和保留在浏览器的网站都在 VeloDrop 设置里配置。升级应用后扩展会自动重新加载；从 0.6.0 之前的版本升级时，请在扩展页点击一次「重新加载」。初次切换时，可以先停用 FDM 等其他下载接管扩展。
+3. 在 Chromium 浏览器中打开「开发人员模式」，点击「加载解压缩的扩展」，在选择文件夹窗口按 **⇧⌘G**，粘贴路径并按回车，再点击「选择文件夹」。多个 Chromium 浏览器可以共用同一个扩展文件夹。设置里也可以单独复制路径或在访达中显示扩展文件夹。工具栏图标只显示桥接状态；接管开关、最小文件大小和保留在浏览器的网站都在 VeloDrop 设置里配置。升级应用后扩展会自动重新加载；从 0.6.0 之前的版本升级时，请在扩展页点击一次「重新加载」。首次切换时，可以先停用 FDM 等其他下载接管扩展。
+4. Firefox：在设置里点击 Firefox 行的「在 Firefox 中加载」，路径会复制到剪贴板；在打开的 `about:debugging` 中选择「临时载入附加组件」，按 **⇧⌘G** 粘贴路径并选择 `manifest.json`。临时附加组件在 Firefox 重启后会消失，长期使用需要对扩展签名（AMO unlisted 或自建签名）。
 
 GitHub 预发行包使用 ad-hoc 签名，尚未经过 Apple 公证。也可以在本机按下文从源码构建。打包脚本支持现有的 Developer ID 证书。
 
-Mac 应用和浏览器扩展均支持简体中文和英文，分别跟随 macOS 和浏览器的界面语言。
+Mac 应用和浏览器扩展均支持简体中文和英文，分别跟随 macOS 和浏览器的界面语言。Firefox 使用独立的 Gecko manifest，但与 Chromium 版共享全部扩展代码。
 
 ## 使用
 

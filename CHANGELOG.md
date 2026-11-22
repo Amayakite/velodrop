@@ -9,6 +9,7 @@ VeloDrop 的版本记录。版本号以 `Extension/manifest.json` 为准，发�
 - 设置中的「Microsoft Edge」页改为「浏览器」：自动检测 Chrome、Edge、Brave 和 Vivaldi，一次为所有已安装的浏览器注册连接器。
 - 浏览器列表显示各浏览器的图标和连接器状态，可直接打开对应的扩展页；未安装的浏览器会灰显。
 - 应用与扩展的界面文案改为通用「浏览器」，不再只适用于 Edge。
+- 新增 Firefox 支持：注册 Mozilla 原生消息连接器，设置页显示 Firefox 状态，并提供 `about:debugging` 临时加载入口。Firefox 版使用 Gecko manifest 和同一套扩展代码。
 
 ## [0.6.0] - 2026-11-20
 

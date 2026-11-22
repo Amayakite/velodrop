@@ -38,7 +38,7 @@ private enum PreferencesSection: String, CaseIterable, Identifiable {
         switch self {
         case .general: "Choose where files are saved and what happens after a download."
         case .downloads: "Control the queue, connections, and browser confirmations."
-        case .browsers: "Connect the VeloDrop extension to Chrome, Edge, Brave, or Vivaldi and review takeover rules."
+        case .browsers: "Connect the VeloDrop extension to Chrome, Edge, Brave, Vivaldi, or Firefox and review takeover rules."
         case .network: "Set a global bandwidth limit and review proxy behavior."
         }
     }
@@ -420,7 +420,7 @@ struct PreferencesView: View {
                         .fixedSize(horizontal: false, vertical: true)
 
                     VStack(spacing: 0) {
-                        ForEach(Array(ChromiumBrowser.supported.enumerated()), id: \.element.id) { index, browser in
+                        ForEach(Array(SupportedBrowser.supported.enumerated()), id: \.element.id) { index, browser in
                             if index > 0 {
                                 Divider().overlay(VD.hairline).padding(.leading, 30)
                             }
@@ -430,9 +430,14 @@ struct PreferencesView: View {
                     .id(browserSetupVersion)
 
                     step(1, "Choose Set Up Browsers. VeloDrop registers the connector for every installed browser, copies the extension folder path, and opens the extensions page.")
-                    step(2, "In the browser, turn on Developer mode and choose Load unpacked. In the folder picker, press ⇧⌘G, paste the path, press Return, then choose Select Folder.")
-                    step(3, "That is all. The toolbar icon only shows the bridge status, and the connection appears above.")
+                    step(2, "Chrome, Edge, Brave, Vivaldi: turn on Developer mode, choose Load unpacked, and select the copied folder.")
+                    step(3, "Firefox: click Load in Firefox, then choose Load Temporary Add-on in about:debugging and select the copied manifest.json.")
+                    step(4, "That is all. The toolbar icon only shows the bridge status, and the connection appears above.")
                     Text("After updating VeloDrop, reload the extension once in your browser to use the new bridge UI.")
+                        .font(.system(size: 9.5))
+                        .foregroundStyle(.tertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text("Firefox removes temporary add-ons when it restarts. Sign the extension to keep it installed permanently.")
                         .font(.system(size: 9.5))
                         .foregroundStyle(.tertiary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -445,7 +450,7 @@ struct PreferencesView: View {
                             .buttonStyle(VDSecondaryButtonStyle(compact: true))
                     }
                     .padding(.top, 1)
-                    Text("Works with Chrome, Edge, Brave, and Vivaldi.")
+                    Text("Works with Chrome, Edge, Brave, Vivaldi, and Firefox.")
                         .font(.system(size: 9.5))
                         .foregroundStyle(.tertiary)
                 }
@@ -489,7 +494,7 @@ struct PreferencesView: View {
         .vdCard(padding: 12)
     }
 
-    private func browserRow(_ browser: ChromiumBrowser) -> some View {
+    private func browserRow(_ browser: SupportedBrowser) -> some View {
         HStack(spacing: 10) {
             Group {
                 if let icon = browser.icon {
@@ -517,14 +522,17 @@ struct PreferencesView: View {
             }
             Spacer()
             if browser.isInstalled {
-                Button("Open Extensions") { browser.openExtensionsPage() }
-                    .buttonStyle(VDSecondaryButtonStyle(compact: true))
+                Button(browser.actionTitle) {
+                    if browser.family == .firefox { copySelectionPath(browser) }
+                    browser.openInstallPage()
+                }
+                .buttonStyle(VDSecondaryButtonStyle(compact: true))
             }
         }
         .padding(.vertical, 5)
     }
 
-    private func browserStatus(_ browser: ChromiumBrowser) -> LocalizedStringKey {
+    private func browserStatus(_ browser: SupportedBrowser) -> LocalizedStringKey {
         if !browser.isInstalled { return "Not installed" }
         return browser.isRegistered ? "Connector ready" : "Connector not set up"
     }
@@ -626,18 +634,33 @@ struct PreferencesView: View {
         do {
             let count = try BrowserConnector.registerAll(bundle: Bundle.main.bundleURL)
             guard count > 0 else {
-                message = String(localized: "No supported browser was found. Install Chrome, Edge, Brave, or Vivaldi first.")
+                message = String(localized: "No supported browser was found. Install Chrome, Edge, Brave, Vivaldi, or Firefox first.")
                 error = true
                 return
             }
             browserSetupVersion += 1
             copyPath()
-            ChromiumBrowser.firstInstalled?.openExtensionsPage()
+            SupportedBrowser.firstInstalled?.openInstallPage()
             message = String(localized: "Browser connector installed. Load the extension in each browser you want to use.")
             error = false
         } catch {
             message = error.localizedDescription
             self.error = true
+        }
+    }
+
+    private func copySelectionPath(_ browser: SupportedBrowser) {
+        let path = browser.extensionSelectionPath(in: Bundle.main.bundleURL)
+        let clipboard = NSPasteboard.general
+        clipboard.clearContents()
+        let copied = clipboard.setString(path, forType: .string)
+        if browser.family == .firefox {
+            message = copied
+                ? String(localized: "Firefox manifest path copied. In about:debugging, choose Load Temporary Add-on and select manifest.json.")
+                : String(localized: "Couldn’t copy the extension path. You can open the folder in Finder.")
+            error = !copied
+        } else {
+            copyPath()
         }
     }
 

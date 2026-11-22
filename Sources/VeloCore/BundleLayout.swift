@@ -7,4 +7,7 @@ public enum BundleLayout {
     public static func browserExtension(in bundle: URL) -> URL {
         bundle.appendingPathComponent("Contents/Resources/EdgeExtension", isDirectory: true)
     }
+    public static func firefoxExtension(in bundle: URL) -> URL {
+        bundle.appendingPathComponent("Contents/Resources/FirefoxExtension", isDirectory: true)
+    }
 }
