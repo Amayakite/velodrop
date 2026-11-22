@@ -41,7 +41,7 @@ async function rememberAppVersion(version) {
   if (appVersion === version) return;
   await chrome.storage.local.set({ appVersion: version });
   // The app was replaced while this service worker kept running. Reloading
-  // picks up the Edge extension shipped with the new version, but wait until
+  // picks up the browser extension shipped with the new version, but wait until
   // no handoff is in flight so an update cannot interrupt a download.
   if (appVersion) setTimeout(() => void reloadWhenIdle(), 80);
 }
@@ -184,7 +184,7 @@ async function takeOver(item) {
   } catch {
     if (handoff && !canceled) {
       if (handoff.fast) {
-        // Cancellation and storage can succeed independently if Edge exits mid-handoff.
+        // Cancellation and storage can succeed independently if the browser exits mid-handoff.
         const [original] = await chrome.downloads.search({ id: browserId }).catch(() => []);
         if (original?.state !== "interrupted" || original.error !== "USER_CANCELED") {
           await release(handoff, "abandon").catch(() => {});

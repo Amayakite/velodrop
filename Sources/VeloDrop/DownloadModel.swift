@@ -193,7 +193,7 @@ final class DownloadModel {
     }
 
     func useEdge(_ transfer: Transfer) {
-        change(transfer.id, to: .handedToBrowser, message: String(localized: "Sent back to Edge."))
+        change(transfer.id, to: .handedToBrowser, message: String(localized: "Sent back to the browser."))
         if confirmation?.id == transfer.id {
             confirmation = nil
             confirmNextIfNeeded()

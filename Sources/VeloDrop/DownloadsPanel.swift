@@ -396,7 +396,7 @@ struct DownloadsPanel: View {
             Text(search.isEmpty ? "No downloads yet" : "No matching downloads")
                 .font(.system(size: 16, weight: .semibold))
             Text(search.isEmpty
-                 ? "Add a link or download a file from Edge."
+                 ? "Add a link or download a file from your browser."
                  : "Try a different search or file type.")
                 .font(.system(size: 11.5))
                 .foregroundStyle(.secondary)
@@ -410,7 +410,7 @@ struct DownloadsPanel: View {
                         Label("New Download", systemImage: "plus")
                     }
                     .buttonStyle(VDPrimaryButtonStyle())
-                    Button("Edge Settings…", action: openPreferences)
+                    Button("Browser Settings…", action: openPreferences)
                         .buttonStyle(VDSecondaryButtonStyle())
                 }
                 .padding(.top, 4)
@@ -819,7 +819,7 @@ private struct DownloadRow: View {
     private var detail: String {
         switch transfer.state {
         case .awaitingConfirmation:
-            return [String(localized: "From Microsoft Edge"),
+            return [String(localized: "From Browser"),
                     transfer.total > 0 ? Format.bytes(transfer.total) : nil]
                 .compactMap { $0 }.joined(separator: " · ")
         case .queued:
@@ -844,7 +844,7 @@ private struct DownloadRow: View {
         case .canceled:
             return String(localized: "Canceled")
         case .handedToBrowser:
-            return String(localized: "Sent back to Edge.")
+            return String(localized: "Sent back to the browser.")
         }
     }
 
@@ -908,7 +908,7 @@ private struct DownloadRow: View {
         }
         if transfer.fromBrowser && !transfer.state.terminal {
             Divider()
-            Button("Continue in Edge") { model.useEdge(transfer) }
+            Button("Continue in Browser") { model.useEdge(transfer) }
         }
         if !transfer.state.terminal {
             Button("Cancel download", role: .destructive) { model.cancel(transfer) }
@@ -1275,7 +1275,7 @@ extension Transfer {
         case .completed: String(localized: "Completed")
         case .failed: String(localized: "Download failed")
         case .canceled: String(localized: "Canceled")
-        case .handedToBrowser: String(localized: "Sent back to Edge.")
+        case .handedToBrowser: String(localized: "Sent back to the browser.")
         }
     }
 

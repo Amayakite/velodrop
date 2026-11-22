@@ -118,9 +118,9 @@ struct WelcomeView: View {
             }
         case 1:
             VStack(alignment: .leading, spacing: 10) {
-                Label("Connect Microsoft Edge", systemImage: "puzzlepiece.extension")
+                Label("Connect your browser", systemImage: "puzzlepiece.extension")
                     .font(.system(size: 14, weight: .semibold))
-                Text("Open Settings, select Microsoft Edge, and follow the extension setup steps.")
+                Text("Open Settings, choose Browsers, and follow the extension setup steps.")
                     .font(.system(size: 10.5))
                     .foregroundStyle(.secondary)
                 HStack(spacing: 8) {
@@ -136,7 +136,7 @@ struct WelcomeView: View {
                         .font(.system(size: 10))
                         .foregroundStyle(VD.green)
                 } else {
-                    Text("The bridge checks in automatically after Edge loads the extension.")
+                    Text("The bridge checks in automatically after your browser loads the extension.")
                         .font(.system(size: 9.5))
                         .foregroundStyle(.tertiary)
                 }
@@ -145,13 +145,14 @@ struct WelcomeView: View {
             VStack(alignment: .leading, spacing: 10) {
                 Label("Try your first download", systemImage: "arrow.down.circle")
                     .font(.system(size: 14, weight: .semibold))
-                Text("Download a file in Edge. VeloDrop will ask whether to download here, use Edge, or cancel.")
+                Text("Download a file in your browser. VeloDrop will ask whether to download here, use the browser, or cancel.")
                     .font(.system(size: 10.5))
                     .foregroundStyle(.secondary)
-                Button("Test Download in Edge") {
-                    guard let edge = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.microsoft.edgemac"),
+                Button("Test Download in Browser") {
+                    guard let browser = ChromiumBrowser.firstInstalled?.appURL,
                           let url = URL(string: "https://speed.cloudflare.com/__down?bytes=3145728") else { return }
-                    NSWorkspace.shared.open([url], withApplicationAt: edge, configuration: NSWorkspace.OpenConfiguration())
+                    NSWorkspace.shared.open([url], withApplicationAt: browser,
+                                            configuration: NSWorkspace.OpenConfiguration())
                 }
                 .buttonStyle(VDPrimaryButtonStyle(compact: true))
                 Text("The test downloads a 3 MiB file from Cloudflare. Your browser rules still apply.")

@@ -1,6 +1,6 @@
 {
   "extensionDescription": {
-    "message": "Pass ordinary Edge file downloads to VeloDrop for macOS."
+    "message": "Pass ordinary browser file downloads to VeloDrop for macOS."
   },
   "checkingConnection": {
     "message": "Checking bridge…"
@@ -12,10 +12,10 @@
     "message": "VeloDrop is not connected"
   },
   "bridgeOnly": {
-    "message": "This extension only passes Edge downloads to VeloDrop. All settings live in the VeloDrop app."
+    "message": "This extension only passes browser downloads to VeloDrop. All settings live in the VeloDrop app."
   },
   "bridgeHint": {
-    "message": "Use VeloDrop Settings to change which downloads are taken over, the minimum size, and sites that stay in Edge."
+    "message": "Use VeloDrop Settings to change which downloads are taken over, the minimum size, and sites that stay in the browser."
   },
   "openVeloDrop": {
     "message": "Open VeloDrop Settings"
@@ -36,7 +36,7 @@
     }
   },
   "excludedShort": {
-    "message": "$COUNT$ sites kept in Edge",
+    "message": "$COUNT$ sites kept in the browser",
     "placeholders": {
       "count": { "content": "$1" }
     }

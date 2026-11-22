@@ -1,6 +1,6 @@
 {
   "extensionDescription": {
-    "message": "将 Edge 中的普通文件下载交给 macOS 上的 VeloDrop。"
+    "message": "将浏览器中的普通文件下载交给 macOS 上的 VeloDrop。"
   },
   "checkingConnection": {
     "message": "正在检查连接…"
@@ -12,10 +12,10 @@
     "message": "未连接到 VeloDrop"
   },
   "bridgeOnly": {
-    "message": "这个扩展只负责把 Edge 的下载交给 VeloDrop。所有设置都在 VeloDrop 应用中。"
+    "message": "这个扩展只负责把浏览器的下载交给 VeloDrop。所有设置都在 VeloDrop 应用中。"
   },
   "bridgeHint": {
-    "message": "在 VeloDrop 设置里调整接管开关、最小文件大小和保留在 Edge 下载的网站。"
+    "message": "在 VeloDrop 设置里调整接管开关、最小文件大小和保留在浏览器下载的网站。"
   },
   "openVeloDrop": {
     "message": "打开 VeloDrop 设置"

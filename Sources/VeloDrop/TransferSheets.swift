@@ -78,7 +78,7 @@ struct DownloadConfirmationView: View {
             VStack(alignment: .leading, spacing: 7) {
                 HStack(spacing: 6) {
                     SectionEyebrow(text: "Confirm Download")
-                    StatusBadge(state: .awaitingConfirmation, text: "From Edge", compact: true)
+                    StatusBadge(state: .awaitingConfirmation, text: "From Browser", compact: true)
                 }
                 TextField("Filename", text: $filename)
                     .textFieldStyle(.plain)
@@ -202,7 +202,7 @@ struct DownloadConfirmationView: View {
                 .buttonStyle(VDSecondaryButtonStyle())
                 .keyboardShortcut(.cancelAction)
             Spacer()
-            Button("Use Edge") { model.useEdge(transfer) }
+            Button("Use Browser") { model.useEdge(transfer) }
                 .buttonStyle(VDSecondaryButtonStyle())
             Button("Use VeloDrop") {
                 model.confirm(transfer, into: directory, connections: connections,
@@ -256,7 +256,7 @@ struct TransferDetailsView: View {
                         }
                     }
                     detailSection("Request") {
-                        detailRow("Added from", transfer.fromBrowser ? "Microsoft Edge" : String(localized: "Manually Added"))
+                        detailRow("Added from", transfer.fromBrowser ? String(localized: "Browser") : String(localized: "Manually Added"))
                         if let source = transfer.sourceURL {
                             detailRow("Source", source.absoluteString, monospaced: true)
                         }

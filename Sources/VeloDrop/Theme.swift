@@ -72,7 +72,7 @@ extension TransferState {
         case .completed: "Completed"
         case .failed: "Failed"
         case .canceled: "Canceled"
-        case .handedToBrowser: "In Edge"
+        case .handedToBrowser: "In Browser"
         }
     }
 }

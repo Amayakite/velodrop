@@ -19,6 +19,6 @@ enum ProxyRouting {
             parts.port = first[kCFProxyPortNumberKey as String] as? Int
             if let endpoint = parts.url, let proxy = BrowserProxy.http(endpoint) { return proxy }
         }
-        throw TransferError.engine(String(localized: "This proxy route needs to be handled by Edge."))
+        throw TransferError.engine(String(localized: "This proxy route needs to be handled by the browser."))
     }
 }

@@ -1,58 +1,17 @@
 import AppKit
-import CryptoKit
 import SwiftUI
 import UniformTypeIdentifiers
 import VeloCore
 
-private struct EdgeRegistration {
-    let bundle: URL
-
-    private var hostManifest: URL {
-        FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Application Support/Microsoft Edge/NativeMessagingHosts", isDirectory: true)
-            .appendingPathComponent(BundleLayout.identifier + ".json")
-    }
-
-    func install() throws {
-        let extensionFolder = BundleLayout.browserExtension(in: bundle)
-        let data = try Data(contentsOf: extensionFolder.appendingPathComponent("manifest.json"))
-        guard let manifest = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let key = manifest["key"] as? String, let spki = Data(base64Encoded: key),
-              FileManager.default.isExecutableFile(atPath: BundleLayout.bridge(in: bundle).path) else {
-            throw TransferError.engineUnavailable
-        }
-        let alphabet = Array("abcdefghijklmnop")
-        let id = String(SHA256.hash(data: spki).prefix(16).flatMap {
-            [alphabet[Int($0 >> 4)], alphabet[Int($0 & 15)]]
-        })
-        let host = [
-            "name": BundleLayout.identifier,
-            "description": "VeloDrop download handoff",
-            "path": BundleLayout.bridge(in: bundle).path,
-            "type": "stdio",
-            "allowed_origins": ["chrome-extension://\(id)/"],
-        ] as [String: Any]
-        try FileManager.default.createDirectory(at: hostManifest.deletingLastPathComponent(),
-                                                withIntermediateDirectories: true)
-        try JSONSerialization.data(withJSONObject: host, options: [.prettyPrinted, .sortedKeys])
-            .write(to: hostManifest, options: .atomic)
-    }
-
-    func remove() throws {
-        guard FileManager.default.fileExists(atPath: hostManifest.path) else { return }
-        try FileManager.default.removeItem(at: hostManifest)
-    }
-}
-
 private enum PreferencesSection: String, CaseIterable, Identifiable {
-    case general, downloads, edge, network
+    case general, downloads, browsers, network
     var id: Self { self }
 
     var title: LocalizedStringKey {
         switch self {
         case .general: "General"
         case .downloads: "Downloads"
-        case .edge: "Microsoft Edge"
+        case .browsers: "Browsers"
         case .network: "Network"
         }
     }
@@ -61,7 +20,7 @@ private enum PreferencesSection: String, CaseIterable, Identifiable {
         switch self {
         case .general: "gearshape"
         case .downloads: "arrow.down.circle"
-        case .edge: "puzzlepiece.extension"
+        case .browsers: "puzzlepiece.extension"
         case .network: "network"
         }
     }
@@ -70,7 +29,7 @@ private enum PreferencesSection: String, CaseIterable, Identifiable {
         switch self {
         case .general: .secondary
         case .downloads: VD.accent
-        case .edge: VD.teal
+        case .browsers: VD.teal
         case .network: VD.purple
         }
     }
@@ -79,7 +38,7 @@ private enum PreferencesSection: String, CaseIterable, Identifiable {
         switch self {
         case .general: "Choose where files are saved and what happens after a download."
         case .downloads: "Control the queue, connections, and browser confirmations."
-        case .edge: "Connect the browser extension and review takeover rules."
+        case .browsers: "Connect the VeloDrop extension to Chrome, Edge, Brave, or Vivaldi and review takeover rules."
         case .network: "Set a global bandwidth limit and review proxy behavior."
         }
     }
@@ -94,6 +53,7 @@ struct PreferencesView: View {
     @State private var section: PreferencesSection = .general
     @State private var choosingFolder = false
     @State private var checkedAt: Date?
+    @State private var browserSetupVersion = 0
     @AppStorage("deleteFilesByDefault") private var deleteFiles = true
     @AppStorage("playCompletionSound") private var playSound = false
 
@@ -115,7 +75,7 @@ struct PreferencesView: View {
                     switch section {
                     case .general: general
                     case .downloads: downloads
-                    case .edge: edge
+                    case .browsers: browsers
                     case .network: network
                     }
                     if let message {
@@ -137,11 +97,11 @@ struct PreferencesView: View {
             checkForUpdates()
         }
         .onReceive(NotificationCenter.default.publisher(for: .velodropOpenEdgeSettings)) { _ in
-            section = .edge
+            section = .browsers
             refreshConnection()
         }
         .onReceive(Timer.publish(every: 5, on: .main, in: .common).autoconnect()) { _ in
-            if section == .edge { refreshConnection() }
+            if section == .browsers { refreshConnection() }
         }
         .fileImporter(isPresented: $choosingFolder, allowedContentTypes: [.folder]) { result in
             do { model.defaultFolder = try result.get().path }
@@ -330,7 +290,7 @@ struct PreferencesView: View {
             settingsCard("Browser Takeover", symbol: "safari") {
                 VStack(alignment: .leading, spacing: 7) {
                     toggleRow("Confirm browser downloads", isOn: $model.confirmBrowserDownloads)
-                    Text("Choose VeloDrop, Edge, or cancel in the download confirmation window.")
+                    Text("Choose VeloDrop, your browser, or cancel in the download confirmation window.")
                         .font(.system(size: 9.5))
                         .foregroundStyle(.secondary)
                         .padding(.leading, 24)
@@ -371,14 +331,14 @@ struct PreferencesView: View {
         }
     }
 
-    private var edge: some View {
+    private var browsers: some View {
         VStack(spacing: 12) {
             connectionCard
 
             settingsCard("Browser Takeover", symbol: "hand.raised") {
                 VStack(spacing: 0) {
-                    toggleRow("Take over downloads from Edge", isOn: $model.browserTakeoverEnabled)
-                    Text("Ordinary files that match these rules are offered in VeloDrop instead of Edge.")
+                    toggleRow("Take over browser downloads", isOn: $model.browserTakeoverEnabled)
+                    Text("Ordinary files that match these rules are offered in VeloDrop instead of in the browser.")
                         .font(.system(size: 9.5))
                         .foregroundStyle(.secondary)
                         .padding(.leading, 24)
@@ -390,7 +350,7 @@ struct PreferencesView: View {
                         VStack(alignment: .leading, spacing: 2) {
                             Text("Minimum file size")
                                 .font(.system(size: 11))
-                            Text("Smaller files stay in Edge.")
+                            Text("Smaller files stay in the browser.")
                                 .font(.system(size: 9.5))
                                 .foregroundStyle(.secondary)
                         }
@@ -412,7 +372,7 @@ struct PreferencesView: View {
 
                     Divider().overlay(VD.hairline).padding(.leading, 24)
 
-                    toggleRow("Reuse Edge session headers", isOn: $model.browserReuseSessionHeaders)
+                    toggleRow("Reuse browser session headers", isOn: $model.browserReuseSessionHeaders)
                     Text("Only the accepted download may use its cookies and request headers. Redirects never receive them.")
                         .font(.system(size: 9.5))
                         .foregroundStyle(.secondary)
@@ -423,7 +383,7 @@ struct PreferencesView: View {
 
                     VStack(alignment: .leading, spacing: 6) {
                         HStack(spacing: 4) {
-                            Text("Keep these sites in Edge")
+                            Text("Keep these sites in the browser")
                                 .font(.system(size: 11))
                             Spacer()
                             if excludedHostCount > 0 {
@@ -452,21 +412,32 @@ struct PreferencesView: View {
                 }
             }
 
-            settingsCard("Edge Bridge", symbol: "link") {
+            settingsCard("Browser Connectors", symbol: "link") {
                 VStack(alignment: .leading, spacing: 11) {
-                    Text("The Edge extension is only a bridge. It has no settings of its own; everything is managed here.")
+                    Text("The VeloDrop extension only bridges downloads. It has no settings of its own; everything is managed here.")
                         .font(.system(size: 10))
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
-                    step(1, "Choose Set Up Edge. VeloDrop registers the connector, copies the extension folder path, and opens Edge.")
-                    step(2, "Turn on Developer mode in Edge and choose Load unpacked. In the folder picker, press ⇧⌘G, paste the path, press Return, then choose Select Folder.")
+
+                    VStack(spacing: 0) {
+                        ForEach(Array(ChromiumBrowser.supported.enumerated()), id: \.element.id) { index, browser in
+                            if index > 0 {
+                                Divider().overlay(VD.hairline).padding(.leading, 30)
+                            }
+                            browserRow(browser)
+                        }
+                    }
+                    .id(browserSetupVersion)
+
+                    step(1, "Choose Set Up Browsers. VeloDrop registers the connector for every installed browser, copies the extension folder path, and opens the extensions page.")
+                    step(2, "In the browser, turn on Developer mode and choose Load unpacked. In the folder picker, press ⇧⌘G, paste the path, press Return, then choose Select Folder.")
                     step(3, "That is all. The toolbar icon only shows the bridge status, and the connection appears above.")
-                    Text("After updating VeloDrop, reload the extension once in Edge to use the new bridge UI.")
+                    Text("After updating VeloDrop, reload the extension once in your browser to use the new bridge UI.")
                         .font(.system(size: 9.5))
                         .foregroundStyle(.tertiary)
                         .fixedSize(horizontal: false, vertical: true)
                     HStack(spacing: 8) {
-                        Button("Set Up Edge…", action: install)
+                        Button("Set Up Browsers…", action: install)
                             .buttonStyle(VDPrimaryButtonStyle(compact: true))
                         Button("Copy Extension Path", action: copyPath)
                             .buttonStyle(VDSecondaryButtonStyle(compact: true))
@@ -474,12 +445,13 @@ struct PreferencesView: View {
                             .buttonStyle(VDSecondaryButtonStyle(compact: true))
                     }
                     .padding(.top, 1)
+                    Text("Works with Chrome, Edge, Brave, and Vivaldi.")
+                        .font(.system(size: 9.5))
+                        .foregroundStyle(.tertiary)
                 }
             }
 
             HStack(spacing: 8) {
-                Button("Open Extensions") { openEdge("edge://extensions/") }
-                    .buttonStyle(VDSecondaryButtonStyle(compact: true))
                 Button("Disconnect", action: disconnect)
                     .buttonStyle(VDDangerButtonStyle(compact: true))
                 Spacer()
@@ -515,6 +487,46 @@ struct PreferencesView: View {
                 .buttonStyle(VDSecondaryButtonStyle(compact: true))
         }
         .vdCard(padding: 12)
+    }
+
+    private func browserRow(_ browser: ChromiumBrowser) -> some View {
+        HStack(spacing: 10) {
+            Group {
+                if let icon = browser.icon {
+                    Image(nsImage: icon)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                } else {
+                    Image(systemName: "globe")
+                        .font(.system(size: 14))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .frame(width: 20, height: 20)
+            .opacity(browser.isInstalled ? 1 : 0.35)
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text(browser.name)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(browser.isInstalled ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
+                Text(browserStatus(browser))
+                    .font(.system(size: 9.5))
+                    .foregroundStyle(browser.isInstalled
+                                     ? AnyShapeStyle(browser.isRegistered ? VD.green : VD.orange)
+                                     : AnyShapeStyle(.tertiary))
+            }
+            Spacer()
+            if browser.isInstalled {
+                Button("Open Extensions") { browser.openExtensionsPage() }
+                    .buttonStyle(VDSecondaryButtonStyle(compact: true))
+            }
+        }
+        .padding(.vertical, 5)
+    }
+
+    private func browserStatus(_ browser: ChromiumBrowser) -> LocalizedStringKey {
+        if !browser.isInstalled { return "Not installed" }
+        return browser.isRegistered ? "Connector ready" : "Connector not set up"
     }
 
     private var excludedHostCount: Int {
@@ -612,20 +624,20 @@ struct PreferencesView: View {
 
     private func install() {
         do {
-            try EdgeRegistration(bundle: Bundle.main.bundleURL).install()
+            let count = try BrowserConnector.registerAll(bundle: Bundle.main.bundleURL)
+            guard count > 0 else {
+                message = String(localized: "No supported browser was found. Install Chrome, Edge, Brave, or Vivaldi first.")
+                error = true
+                return
+            }
+            browserSetupVersion += 1
             copyPath()
-            openEdge("edge://extensions/")
+            ChromiumBrowser.firstInstalled?.openExtensionsPage()
+            message = String(localized: "Browser connector installed. Load the extension in each browser you want to use.")
+            error = false
         } catch {
             message = error.localizedDescription
             self.error = true
-        }
-    }
-
-    private func openEdge(_ address: String) {
-        if let edge = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.microsoft.edgemac"),
-           let url = URL(string: address) {
-            NSWorkspace.shared.open([url], withApplicationAt: edge, configuration: NSWorkspace.OpenConfiguration(),
-                                    completionHandler: nil)
         }
     }
 
@@ -640,13 +652,9 @@ struct PreferencesView: View {
     }
 
     private func disconnect() {
-        do {
-            try EdgeRegistration(bundle: Bundle.main.bundleURL).remove()
-            message = String(localized: "The connector was removed. You can remove the extension in Edge.")
-            error = false
-        } catch {
-            message = error.localizedDescription
-            self.error = true
-        }
+        BrowserConnector.removeAll()
+        browserSetupVersion += 1
+        message = String(localized: "The connector was removed. You can remove the extension in each browser.")
+        error = false
     }
 }

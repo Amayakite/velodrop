@@ -66,7 +66,7 @@ function matchesBypass(url, entry) {
     rule = rule.slice(scheme[0].length);
   }
   if (rule.includes("/")) {
-    // Chromium only compares IP ranges to literal IPs. Keep ambiguous ranges in Edge.
+    // Chromium only compares IP ranges to literal IPs. Keep ambiguous ranges in the browser.
     return /^(\[|[\d.]+$)/.test(url.hostname) ? null : false;
   }
   const port = /:(\d+)$/.exec(rule);

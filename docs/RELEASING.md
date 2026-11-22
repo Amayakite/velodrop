@@ -7,7 +7,7 @@ VeloDrop 使用 GitHub Actions 做两件事：
 
 ## 版本号约定
 
-版本号的唯一来源是 [`Extension/manifest.json`](../Extension/manifest.json) 的 `version` 字段。`Scripts/package.sh` 会用它生成应用版本、DMG 文件名和 Edge 扩展版本。
+版本号的唯一来源是 [`Extension/manifest.json`](../Extension/manifest.json) 的 `version` 字段。`Scripts/package.sh` 会用它生成应用版本、DMG 文件名和浏览器扩展版本。
 
 发布 tag 必须和 manifest 完全对应：
 
