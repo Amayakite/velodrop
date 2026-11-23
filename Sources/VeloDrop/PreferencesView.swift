@@ -58,6 +58,9 @@ struct PreferencesView: View {
     @State private var setupError: String?
     @State private var disconnectConfirmation: SupportedBrowser?
     @State private var browserSetupVersion = 0
+    @State private var includeShortCommand = false
+    @State private var terminalMessage: String?
+    @State private var terminalError = false
     @AppStorage("deleteFilesByDefault") private var deleteFiles = true
     @AppStorage("playCompletionSound") private var playSound = false
 
@@ -232,6 +235,30 @@ struct PreferencesView: View {
                         .padding(.leading, 24)
                 }
             }
+            settingsCard("Terminal", symbol: "terminal") {
+                VStack(alignment: .leading, spacing: 7) {
+                    Text("Run velodrop from Terminal to download directly.")
+                        .font(.system(size: 11))
+                    HStack {
+                        Toggle("Also install vd", isOn: $includeShortCommand)
+                            .toggleStyle(.checkbox)
+                            .font(.system(size: 11))
+                        Spacer()
+                        Button("Install Terminal Command", action: installTerminalCommand)
+                            .buttonStyle(VDSecondaryButtonStyle(compact: true))
+                    }
+                    Text("Commands are installed in ~/.local/bin. Add this directory to your shell’s PATH if needed.")
+                        .font(.system(size: 9.5))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if let terminalMessage {
+                        Text(terminalMessage)
+                            .font(.system(size: 10.5))
+                            .foregroundStyle(terminalError ? VD.orange : VD.green)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
             settingsCard("Application", symbol: "app.badge") {
                 VStack(alignment: .leading, spacing: 7) {
                     HStack(spacing: 10) {
@@ -256,6 +283,24 @@ struct PreferencesView: View {
                     }
                 }
             }
+        }
+    }
+
+    private func installTerminalCommand() {
+        do {
+            let installedShortcut = try TerminalCommandInstaller.install(
+                in: Bundle.main.bundleURL, includeShortCommand: includeShortCommand)
+            terminalError = includeShortCommand && !installedShortcut
+            if installedShortcut {
+                terminalMessage = String(localized: "Installed velodrop and vd.")
+            } else if includeShortCommand {
+                terminalMessage = String(localized: "Installed velodrop. The name vd is already in use.")
+            } else {
+                terminalMessage = String(localized: "Installed velodrop.")
+            }
+        } catch {
+            terminalError = true
+            terminalMessage = error.localizedDescription
         }
     }
 

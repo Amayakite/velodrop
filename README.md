@@ -30,6 +30,20 @@ Mac 应用和浏览器扩展均支持简体中文和英文，分别跟随 macOS 
 - 默认沿用浏览器的 User-Agent 和可识别的代理配置。在 VeloDrop 设置中开启「沿用浏览器会话请求头」后，扩展会读取这次下载可用的会话头。固定 HTTP 代理和直连可交给 VeloDrop。PAC、SOCKS、识别出的非 GET 请求及无法可靠沿用的网络环境留给浏览器。
 - 浏览器会话头只用于接管请求，重定向后的其他 URL 不接收这些头。详情保存头名称，来源链接去掉查询参数和片段。
 
+### 终端命令
+
+在「设置 → 通用 → 终端」点「安装终端命令」。勾选「同时安装短命令 vd」即可使用 `vd`。如果终端找不到命令，把 `export PATH="$HOME/.local/bin:$PATH"` 加入 shell 的启动文件（如 `~/.zshrc`），再打开新的终端。
+
+```sh
+velodrop 'https://example.com/file.zip'
+vd --connections 12 --dir './packages' 'https://example.com/a.zip' 'https://example.com/b.zip'
+velodrop --no-ui --wait 'https://example.com/file.zip'
+```
+
+命令会直接把链接提交给 VeloDrop，打开下载窗口并选中新任务。省略 `--connections` 或 `--dir` 会使用应用设置。`--dir` 的相对路径以终端当前目录为准。同名文件会保留两份。
+
+`--no-ui` 在后台提交。`--wait` 等待整批下载结束，全部成功时退出码为 `0`，有任务失败、取消或提交失败时为 `1`，参数错误时为 `2`。命令向标准输出逐行写入任务 ID。按 Ctrl+C 可以结束终端等待，已提交的任务继续在应用中运行。
+
 ## 构建与验证
 
 需要 macOS 14 或更新版本、Swift 6 和 Apple Command Line Tools。GitHub 目前提供 arm64 安装包。构建脚本为执行构建的 Mac 架构生成安装包。
@@ -37,6 +51,7 @@ Mac 应用和浏览器扩展均支持简体中文和英文，分别跟随 macOS 
 ```sh
 Scripts/package.sh
 swift run -c release VeloCoreChecks
+node Scripts/cli-smoke.mjs
 bash Scripts/browser-checks.sh
 ```
 
@@ -44,7 +59,7 @@ bash Scripts/browser-checks.sh
 
 ### 自动构建与发布
 
-- push 和 pull request 会运行 Release 构建、核心检查、本地化和脚本校验、打包及三款浏览器的回归测试。见 [CI](.github/workflows/ci.yml)。
+- push 和 pull request 会运行 Release 构建、核心检查、本地化和脚本校验、打包、终端命令及三款浏览器的回归测试。见 [CI](.github/workflows/ci.yml)。
 - main 分支的 CI 会额外产出一个可用 Actions artifact 下载的未发布 DMG。
 - 推送 `v*` tag 会触发 [Release](.github/workflows/release.yml)：在 arm64 `macos-15` runner 上重新打包、验证 DMG 与签名、生成 SHA256，并自动创建 GitHub Release。
 - 版本号唯一来源是 `Extension/manifest.json`，发布 tag 必须与它一致。完整步骤、手动重跑、签名与常见问题见 [docs/RELEASING.md](docs/RELEASING.md)，版本记录见 [CHANGELOG.md](CHANGELOG.md)。

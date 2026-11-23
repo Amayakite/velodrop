@@ -9,7 +9,6 @@ struct DownloadsPanel: View {
     let openBrowserPreferences: () -> Void
 
     @State private var search = ""
-    @State private var selected = Set<UUID>()
     @State private var anchor: UUID?
     @State private var deletion: DownloadDeletion?
     @State private var showLink = false
@@ -43,6 +42,11 @@ struct DownloadsPanel: View {
         return ascending ? sorted : sorted.reversed()
     }
 
+    private var selected: Set<UUID> {
+        get { model.selectedDownloads }
+        nonmutating set { model.selectedDownloads = newValue }
+    }
+
     private var selection: [Transfer] { model.userTransfers.filter { selected.contains($0.id) } }
 
     private var monthStats: (bytes: Int64, count: Int) {
@@ -57,31 +61,22 @@ struct DownloadsPanel: View {
     }
 
     var body: some View {
-        GeometryReader { geometry in
-            let canDockInspector = geometry.size.width >= 940
-            let showsInspector = inspector && canDockInspector
-            let canDockSidebar = geometry.size.width >= (showsInspector ? 1240 : 980)
-            let showRates = visible.contains { $0.state == .downloading }
-            VStack(spacing: 0) {
-                topBar(canDockSidebar: canDockSidebar)
-                Divider().overlay(VD.hairline)
-                HStack(spacing: 0) {
-                    if sidebar && canDockSidebar {
-                        DownloadSidebar(model: model, scope: $scope, monthStats: monthStats)
-                            .frame(width: 196)
-                        Divider().overlay(VD.hairline)
-                    }
-                    content(showsSidebar: sidebar && canDockSidebar, canDockInspector: canDockInspector, showRates: showRates)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    if showsInspector {
-                        Divider().overlay(VD.hairline)
-                        inspectorPane
-                            .frame(width: 294)
+        ScrollViewReader { proxy in
+            layout
+                .task(id: model.terminalSelection) {
+                    let ids = model.terminalSelection
+                    guard let first = ids.first else { return }
+                    scope = .all
+                    search = ""
+                    fileKind = "All Types"
+                    anchor = first
+                    listFocused = true
+                    DispatchQueue.main.async {
+                        guard model.terminalSelection == ids else { return }
+                        proxy.scrollTo(first, anchor: .center)
+                        model.clearTerminalSelection(ids)
                     }
                 }
-                Divider().overlay(VD.hairline)
-                statusBar
-            }
         }
         .background(Color(nsColor: .textBackgroundColor))
         .sheet(isPresented: $showLink) { AddDownloadsView(model: model) }
@@ -110,8 +105,6 @@ struct DownloadsPanel: View {
             Text("Downloaded files will stay on disk.")
         }
         .onChange(of: model.userTransfers.map(\.id)) { _, ids in selected.formIntersection(ids) }
-        .onChange(of: scope) { selected.removeAll() }
-        .onChange(of: search) { selected.removeAll() }
         .onReceive(ticker) { _ in
             samples.append(Double(model.rate))
             if samples.count > 44 { samples.removeFirst(samples.count - 44) }
@@ -121,6 +114,49 @@ struct DownloadsPanel: View {
             do { try model.addLinks(urls.map(\.absoluteString).joined(separator: "\n")); return true }
             catch { model.notice = error.localizedDescription; return false }
         }
+    }
+
+    private var layout: some View {
+        GeometryReader { geometry in
+            let canDockInspector = geometry.size.width >= 940
+            let showsInspector = inspector && canDockInspector
+            let canDockSidebar = geometry.size.width >= (showsInspector ? 1240 : 980)
+            let showRates = visible.contains { $0.state == .downloading }
+            VStack(spacing: 0) {
+                topBar(canDockSidebar: canDockSidebar)
+                Divider().overlay(VD.hairline)
+                HStack(spacing: 0) {
+                    if sidebar && canDockSidebar {
+                        DownloadSidebar(model: model, scope: Binding(get: { scope }, set: setScope), monthStats: monthStats)
+                            .frame(width: 196)
+                        Divider().overlay(VD.hairline)
+                    }
+                    content(showsSidebar: sidebar && canDockSidebar, canDockInspector: canDockInspector, showRates: showRates)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    if showsInspector {
+                        Divider().overlay(VD.hairline)
+                        inspectorPane
+                            .frame(width: 294)
+                    }
+                }
+                Divider().overlay(VD.hairline)
+                statusBar
+            }
+        }
+    }
+
+    private func setScope(_ value: DownloadScope) {
+        guard scope != value else { return }
+        scope = value
+        selected.removeAll()
+        anchor = nil
+    }
+
+    private func setSearch(_ value: String) {
+        guard search != value else { return }
+        search = value
+        selected.removeAll()
+        anchor = nil
     }
 
     // MARK: - Top bar
@@ -154,12 +190,12 @@ struct DownloadsPanel: View {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(.secondary)
-            TextField("Search Downloads", text: $search)
+            TextField("Search Downloads", text: Binding(get: { search }, set: setSearch))
                 .textFieldStyle(.plain)
                 .font(.system(size: 12))
             if !search.isEmpty {
                 Button {
-                    search = ""
+                    setSearch("")
                 } label: {
                     Image(systemName: "xmark.circle.fill")
                         .font(.system(size: 11))
@@ -270,7 +306,7 @@ struct DownloadsPanel: View {
     private var scopeMenu: some View {
         Menu {
             ForEach(DownloadScope.allCases) { category in
-                Button { scope = category } label: {
+                Button { setScope(category) } label: {
                     Label(category.title, systemImage: scope == category ? "checkmark" : category.symbol)
                 }
             }
@@ -366,6 +402,7 @@ struct DownloadsPanel: View {
                             else { model.onProgress?(item.id) }
                         }
                     )
+                    .id(item.id)
                 }
             }
             .padding(.horizontal, 10)

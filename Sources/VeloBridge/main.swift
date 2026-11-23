@@ -20,7 +20,7 @@ private struct Request: Codable {
 
 private struct Reply: Encodable {
     let ok: Bool
-    var jobs: [String: Workspace.BrowserStatus]?
+    var jobs: [String: Workspace.TransferStatus]?
     var appRunning: Bool?
     var rules: BrowserRules?
     var version: String?
@@ -92,9 +92,9 @@ private func handle(_ data: Data, bundle: URL, browser: BrowserID?) throws -> Re
         return Reply(ok: true)
 
     case "status":
-        var statuses: [String: Workspace.BrowserStatus] = [:]
+        var statuses: [String: Workspace.TransferStatus] = [:]
         for value in (request.ids ?? []).prefix(192) {
-            if let id = UUID(uuidString: value), let status = workspace.browserStatus(id) {
+            if let id = UUID(uuidString: value), let status = workspace.status(id) {
                 statuses[value] = status
             }
         }

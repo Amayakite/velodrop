@@ -68,6 +68,10 @@ final class DownloadModel {
 
     @ObservationIgnored var onBrowserIntake: (() -> Void)?
     @ObservationIgnored private var shouldShowIntake = false
+    @ObservationIgnored var onTerminalIntake: (() -> Void)?
+    @ObservationIgnored private var pendingTerminalIDs: [UUID] = []
+    private(set) var terminalSelection: [UUID] = []
+    var selectedDownloads: Set<UUID> = []
     private(set) var testingBrowser: BrowserID?
     private(set) var browserTestErrors: [BrowserID: String] = [:]
     @ObservationIgnored private var browserTestServer: BrowserTestServer?
@@ -222,8 +226,7 @@ final class DownloadModel {
     func add(_ text: String) throws {
         guard lockDescriptor >= 0, let url = URL(string: text.trimmingCharacters(in: .whitespacesAndNewlines)),
               Transfer.supports(url) else { throw TransferError.invalidURL }
-        let name = url.lastPathComponent.isEmpty ? (url.host ?? "Download") : url.lastPathComponent
-        var transfer = try Transfer(url: url, name: name, fromBrowser: false)
+        var transfer = try Transfer(url: url)
         transfer.destinationPath = defaultFolder
         transfer.existingFilePolicy = existingFilePolicy
         try workspace.update(transfer)
@@ -266,9 +269,20 @@ final class DownloadModel {
     }
 
     func showPendingIntake() {
-        guard shouldShowIntake, let onBrowserIntake else { return }
-        shouldShowIntake = false
-        onBrowserIntake()
+        if shouldShowIntake, let onBrowserIntake {
+            shouldShowIntake = false
+            onBrowserIntake()
+        }
+        if !pendingTerminalIDs.isEmpty, let onTerminalIntake {
+            terminalSelection = pendingTerminalIDs
+            selectedDownloads = Set(pendingTerminalIDs)
+            pendingTerminalIDs.removeAll()
+            onTerminalIntake()
+        }
+    }
+
+    func clearTerminalSelection(_ ids: [UUID]) {
+        if terminalSelection == ids { terminalSelection.removeAll() }
     }
 
     func askToConfirm(_ transfer: Transfer) {
@@ -435,7 +449,7 @@ final class DownloadModel {
 
     private func drainInbox() {
         for (path, var transfer, headers) in workspace.incoming() {
-            if workspace.browserStatus(transfer.id) == nil && !workspace.wasAbandoned(transfer.id) {
+            if workspace.status(transfer.id) == nil && !workspace.wasAbandoned(transfer.id) {
                 let isTest = transfer.browserTestID != nil
                 if isTest && transfer.browserTestID != browserTestID {
                     changeOrRejectTest(transfer)
@@ -460,8 +474,30 @@ final class DownloadModel {
             }
             try? FileManager.default.removeItem(at: path)
         }
+        drainTerminalSubmissions()
         showPendingIntake()
         startLoop()
+    }
+
+    private func drainTerminalSubmissions() {
+        for (path, submission) in workspace.terminalSubmissions() {
+            var accepted = true
+            for var transfer in submission.transfers where workspace.status(transfer.id) == nil {
+                transfer.submittedFromTerminal = true
+                transfer.destinationPath = transfer.destinationPath ?? defaultFolder
+                transfer.existingFilePolicy = .rename
+                if !save(transfer) { accepted = false }
+            }
+            // A batch survives an interruption during intake. The next pass
+            // skips the tasks that already have records.
+            guard accepted else { continue }
+            do {
+                try FileManager.default.removeItem(at: path)
+                if submission.showWindow { pendingTerminalIDs.append(contentsOf: submission.transfers.map(\.id)) }
+            } catch {
+                notice = error.localizedDescription
+            }
+        }
     }
 
     private func changeOrRejectTest(_ transfer: Transfer) {

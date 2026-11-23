@@ -18,6 +18,7 @@ public struct Transfer: Codable, Identifiable, Equatable, Sendable {
     public let fromBrowser: Bool
     public var sourceBrowser: BrowserID?
     public var browserTestID: UUID?
+    public var submittedFromTerminal: Bool?
     public let expectedBytes: Int64?
     public let createdAt: Date
     public var updatedAt: Date
@@ -68,6 +69,11 @@ public struct Transfer: Codable, Identifiable, Equatable, Sendable {
         self.updatedAt = createdAt
         self.state = .queued
         self.total = expectedBytes ?? 0
+    }
+
+    public init(url: URL) throws {
+        let name = url.lastPathComponent.isEmpty ? (url.host ?? "Download") : url.lastPathComponent
+        try self.init(url: url, name: name, fromBrowser: false)
     }
 
     public var fraction: Double? {

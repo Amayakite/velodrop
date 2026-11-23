@@ -1,8 +1,20 @@
 import Darwin
 import Foundation
 
+public struct TerminalSubmission: Codable, Sendable {
+    public let id: UUID
+    public let transfers: [Transfer]
+    public let showWindow: Bool
+
+    public init(transfers: [Transfer], showWindow: Bool) {
+        self.id = UUID()
+        self.transfers = transfers
+        self.showWindow = showWindow
+    }
+}
+
 public struct Workspace: Sendable {
-    public struct BrowserStatus: Codable, Sendable {
+    public struct TransferStatus: Codable, Sendable {
         public let state: TransferState
         public let updatedAt: Int64
 
@@ -98,7 +110,7 @@ public struct Workspace: Sendable {
     }
 
     public func submit(_ transfer: Transfer, headers: BrowserHeaders? = nil, reserve: Bool = false) throws {
-        if browserStatus(transfer.id) != nil { throw TransferError.busy }
+        if status(transfer.id) != nil { throw TransferError.busy }
         let file = reserve ? reservationURL(transfer.id) : inboxURL(transfer.id)
         let data = try JSONEncoder().encode(Incoming(transfer: transfer, fields: headers?.fields ?? [:]))
         try data.write(to: file, options: .atomic)
@@ -111,6 +123,14 @@ public struct Workspace: Sendable {
         try FileManager.default.moveItem(at: reservationURL(id), to: inboxURL(id))
     }
 
+    public func submit(_ submission: TerminalSubmission) throws {
+        let pending = inbox.appendingPathComponent(".\(UUID().uuidString).tmp")
+        defer { try? FileManager.default.removeItem(at: pending) }
+        try JSONEncoder().encode(submission).write(to: pending, options: .withoutOverwriting)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: pending.path)
+        try FileManager.default.moveItem(at: pending, to: terminalSubmissionURL(submission.id))
+    }
+
     public func update(_ transfer: Transfer) throws {
         try JSONEncoder().encode(transfer).write(to: recordURL(transfer.id), options: .atomic)
     }
@@ -118,17 +138,17 @@ public struct Workspace: Sendable {
     public func read(_ id: UUID) -> Transfer? { readFile(recordURL(id)) }
 
     public func removeHistory(_ transfer: Transfer) throws {
-        if transfer.fromBrowser {
-            let status = try JSONEncoder().encode(BrowserStatus(transfer))
+        if transfer.fromBrowser || transfer.submittedFromTerminal == true {
+            let status = try JSONEncoder().encode(TransferStatus(transfer))
             try status.write(to: outcomeURL(transfer.id), options: .atomic)
         }
         try FileManager.default.removeItem(at: recordURL(transfer.id))
     }
 
-    public func browserStatus(_ id: UUID) -> BrowserStatus? {
-        if let transfer = read(id) { return BrowserStatus(transfer) }
+    public func status(_ id: UUID) -> TransferStatus? {
+        if let transfer = read(id) { return TransferStatus(transfer) }
         guard let data = try? Data(contentsOf: outcomeURL(id)) else { return nil }
-        return try? JSONDecoder().decode(BrowserStatus.self, from: data)
+        return try? JSONDecoder().decode(TransferStatus.self, from: data)
     }
 
     public func acknowledge(_ id: UUID) {
@@ -164,12 +184,29 @@ public struct Workspace: Sendable {
 
     public func incoming() -> [(URL, Transfer, BrowserHeaders)] {
         files(in: inbox).compactMap { file in
-            guard let data = try? Data(contentsOf: file) else { return nil }
+            guard UUID(uuidString: file.deletingPathExtension().lastPathComponent) != nil,
+                  let data = try? Data(contentsOf: file) else { return nil }
             let envelope = try? JSONDecoder().decode(Incoming.self, from: data)
             guard let transfer = envelope?.transfer ?? readFile(file),
                   file.lastPathComponent == inboxURL(transfer.id).lastPathComponent else { return nil }
             return (file, transfer, BrowserHeaders(envelope?.fields ?? [:]))
         }.sorted { $0.1.createdAt < $1.1.createdAt }
+    }
+
+    public func terminalSubmissions() -> [(URL, TerminalSubmission)] {
+        files(in: inbox).compactMap { file in
+            guard file.lastPathComponent.hasPrefix("terminal-"),
+                  let data = try? Data(contentsOf: file),
+                  let submission = try? JSONDecoder().decode(TerminalSubmission.self, from: data),
+                  file.lastPathComponent == terminalSubmissionURL(submission.id).lastPathComponent,
+                  !submission.transfers.isEmpty,
+                  submission.transfers.allSatisfy({ !$0.fromBrowser && $0.state == .queued }) else { return nil }
+            return (file, submission)
+        }.sorted { $0.1.transfers[0].createdAt < $1.1.transfers[0].createdAt }
+    }
+
+    private func terminalSubmissionURL(_ id: UUID) -> URL {
+        inbox.appendingPathComponent("terminal-\(id.uuidString).json")
     }
 
     public func all() -> [Transfer] {

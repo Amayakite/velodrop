@@ -322,3 +322,15 @@
 "%lld history records" = "%lld 条下载记录";
 "%lld unfinished downloads will be stopped." = "%lld 项未完成的下载会停止。";
 "%lld files · %@ will be moved to Trash." = "%lld 个文件（%@）将移到废纸篓。";
+
+/* Terminal commands */
+"Terminal" = "终端";
+"Run velodrop from Terminal to download directly." = "在终端运行 velodrop，直接开始下载。";
+"Also install vd" = "同时安装短命令 vd";
+"Install Terminal Command" = "安装终端命令";
+"Commands are installed in ~/.local/bin. Add this directory to your shell’s PATH if needed." = "命令安装在 ~/.local/bin。如终端找不到命令，请把此目录加入 PATH。";
+"Installed velodrop and vd." = "已安装 velodrop 和 vd。";
+"Installed velodrop. The name vd is already in use." = "已安装 velodrop。vd 已被占用。";
+"Installed velodrop." = "已安装 velodrop。";
+"This copy of VeloDrop is missing the terminal command." = "这个版本的 VeloDrop 缺少终端命令。";
+"A command already exists at %@." = "%@ 已有其他命令。";

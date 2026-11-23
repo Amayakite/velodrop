@@ -107,9 +107,10 @@ final class AriaEngine {
             try FileManager.default.createDirectory(at: stage, withIntermediateDirectories: true)
             let proxy = transfer.effectiveProxy ?? .direct
             let address = proxy.endpoint?.absoluteString ?? ""
+            let speedLimit = transfer.speedLimit ?? 0
             var options: [String: Any] = [
                 "gid": gid(transfer.id), "dir": stage.path, "out": "payload",
-                "max-download-limit": String(transfer.speedLimit ?? 0),
+                "max-download-limit": String(speedLimit),
                 "split": String(connections), "max-connection-per-server": String(connections),
                 "min-split-size": "4M", "file-allocation": "none",
                 "continue": "true", "always-resume": "true", "stream-piece-selector": "inorder",
@@ -125,6 +126,7 @@ final class AriaEngine {
             let _: String = try await call("aria2.addUri", [[url.absoluteString], options])
             attached.insert(transfer.id)
             limits[transfer.id] = connections
+            speeds[transfer.id] = speedLimit
         }
     }
 

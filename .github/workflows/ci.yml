@@ -84,6 +84,9 @@ jobs:
       - name: Build DMG
         run: Scripts/package.sh .dist
 
+      - name: Verify terminal command
+        run: node Scripts/cli-smoke.mjs .dist/VeloDrop.app
+
       - name: Verify Chrome, Edge, and Firefox
         run: bash Scripts/browser-checks.sh .dist/VeloDrop.app
 

@@ -29,7 +29,7 @@ contents="$staged/Contents"
 resources="$contents/Resources"
 mkdir -p "$contents/MacOS" "$contents/Helpers" "$resources/VeloDropExtension" "$resources/VeloDropFirefoxExtension" "$resources/Notices"
 cp "$bin/VeloDrop" "$contents/MacOS/"
-cp "$bin/VeloBridge" "$engine/aria2c" "$contents/Helpers/"
+cp "$bin/VeloBridge" "$bin/VeloDropCLI" "$engine/aria2c" "$contents/Helpers/"
 cp "$assets/AppIcon.icns" "$resources/"
 cp -R Resources/. "$resources/"
 cp -R Extension/. "$resources/VeloDropExtension/"
@@ -90,6 +90,7 @@ flags=(--force --sign "$identity")
 if [[ "$identity" != "-" ]]; then flags+=(--options runtime --timestamp); fi
 codesign "${flags[@]}" "$contents/Helpers/aria2c"
 codesign "${flags[@]}" "$contents/Helpers/VeloBridge"
+codesign "${flags[@]}" "$contents/Helpers/VeloDropCLI"
 codesign "${flags[@]}" "$staged"
 codesign --verify --deep --strict "$staged"
 

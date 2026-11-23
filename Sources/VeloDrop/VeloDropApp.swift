@@ -114,11 +114,14 @@ final class AppLifecycle: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        let background = ProcessInfo.processInfo.environment["VELODROP_BACKGROUND_LAUNCH"] == "1"
         if model.duplicateInstance {
-            let identifier = Bundle.main.bundleIdentifier ?? BundleLayout.identifier
-            NSRunningApplication.runningApplications(withBundleIdentifier: identifier)
-                .first { $0.processIdentifier != ProcessInfo.processInfo.processIdentifier }?
-                .activate(options: [.activateAllWindows])
+            if !background {
+                let identifier = Bundle.main.bundleIdentifier ?? BundleLayout.identifier
+                NSRunningApplication.runningApplications(withBundleIdentifier: identifier)
+                    .first { $0.processIdentifier != ProcessInfo.processInfo.processIdentifier }?
+                    .activate(options: [.activateAllWindows])
+            }
             NSApp.terminate(nil)
             return
         }
@@ -132,11 +135,11 @@ final class AppLifecycle: NSObject, NSApplicationDelegate, NSWindowDelegate {
         item.button?.target = self
         item.button?.action = #selector(statusItemClicked)
         updateStatusItem()
-        let background = ProcessInfo.processInfo.environment["VELODROP_BACKGROUND_LAUNCH"] == "1"
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             self.model.onConfirmationChanged = { [weak self] in self?.scheduleConfirmationUpdate() }
             self.model.onProgress = { [weak self] id in self?.openProgress(id) }
+            self.model.onTerminalIntake = { [weak self] in self?.openDownloads() }
             self.model.onBrowserIntake = { [weak self] in
                 guard let self else { return }
                 if self.model.confirmation != nil { self.scheduleConfirmationUpdate() }
