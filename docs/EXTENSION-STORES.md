@@ -21,7 +21,11 @@ Requires the free VeloDrop companion app on an Apple silicon Mac with macOS 14 o
 
 VeloDrop 将符合条件的文件下载交给 Mac 上的 VeloDrop 下载器。你可以在开始时选择保存位置，查看下载进度和连接数，或把任务交回浏览器。应用内可设置最小接管大小，以及始终由浏览器处理的网站。
 
+下载记录集中保存在 Mac 上。完成后可直接打开文件、在访达中显示，或者批量删除记录和文件。下载失败时，符合条件的浏览器任务会交回原浏览器。需要登录才能下载的文件，可以按需启用会话请求头复用，让应用沿用匹配本次下载的会话信息。
+
 需要安装 VeloDrop Mac 应用，适用于 Apple 芯片和 macOS 14 或更新版本。完成安装后，打开「VeloDrop → 设置 → 浏览器」，连接当前浏览器并测试下载。
+
+VeloDrop 在本机处理下载信息，开发者不会收到你的下载记录或会话凭据。你可以随时暂停自动接管，并继续使用浏览器原有的下载方式。
 
 **Website** [VeloDrop](https://github.com/Amayakite/velodrop)
 
