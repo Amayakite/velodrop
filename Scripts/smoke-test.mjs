@@ -489,5 +489,6 @@ try {
   fixture.close();
   proxy.closeAllConnections();
   proxy.close();
-  rmSync(here, { recursive: true, force: true });
+  // Chromium helper processes can still flush profile files after the main process exits.
+  rmSync(here, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 }

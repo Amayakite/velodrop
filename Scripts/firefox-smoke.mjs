@@ -270,5 +270,5 @@ try {
     console.error("Records:", records().map(({ name, state, message }) => ({ name, state, message })));
     console.error("Fixture:", events.slice(-20));
   }
-  rmSync(review, { recursive: true, force: true });
+  rmSync(review, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 }
