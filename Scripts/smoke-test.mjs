@@ -174,6 +174,7 @@ class CDP {
   constructor(browser) {
     this.browser = browser;
     this.input = browser.stdio[3];
+    this.input.on("error", () => {});
     browser.stdio[4].setEncoding("utf8").on("data", data => {
       this.buffer += data;
       const messages = this.buffer.split("\0");
@@ -198,7 +199,12 @@ class CDP {
         if (reply.error) reject(new Error(method + " " + reply.error.message));
         else resolve(reply.result);
       });
-      this.input.write(JSON.stringify({ id, method, params, sessionId }) + "\0");
+      this.input.write(JSON.stringify({ id, method, params, sessionId }) + "\0", error => {
+        if (!error) return;
+        clearTimeout(timer);
+        this.pending.delete(id);
+        reject(error);
+      });
     });
   }
 
@@ -229,6 +235,7 @@ let desktop;
 let launchedDesktop;
 let requestedDesktopLaunch = false;
 let browser;
+let cdp;
 let registered = false;
 try {
   assert.ok(existsSync(binary), browserName + " is required for the browser smoke test.");
@@ -273,6 +280,7 @@ try {
 
   const startDesktop = () => child(desktopBinary, [
     "-confirmBrowserDownloads", "NO",
+    "-showWindowOnCapture", "NO",
     "-browserTakeoverEnabled", "YES",
     "-browserMinimumMiB", "2",
     "-browserExcludedHosts", "",
@@ -294,7 +302,7 @@ try {
     "--load-extension=" + extension,
     ...(smokeLocale ? ["--lang=" + smokeLocale, "-AppleLanguages", "(" + smokeLocale + ")"] : []),
   ], { env, stdio: ["ignore", "ignore", "pipe", "pipe", "pipe"] }, browserLog);
-  const cdp = new CDP(browser);
+  cdp = new CDP(browser);
   await cdp.send("Browser.getVersion");
   let loaded;
   try {
@@ -480,6 +488,11 @@ try {
   console.error(browserName + ":", browserLog.join("").slice(-3000));
   process.exitCode = 1;
 } finally {
+  if (cdp && browser.exitCode === null && browser.signalCode === null) {
+    const exited = new Promise(resolve => browser.once("exit", resolve));
+    await Promise.race([cdp.send("Browser.close").catch(() => {}), sleep(750)]);
+    await Promise.race([exited, sleep(2500)]);
+  }
   await shutdown(browser);
   await shutdown(desktop);
   const activeLaunch = launchedDesktop ?? (requestedDesktopLaunch && !desktop ? runningDesktop() : null);
@@ -490,5 +503,10 @@ try {
   proxy.closeAllConnections();
   proxy.close();
   // Chromium helper processes can still flush profile files after the main process exits.
-  rmSync(here, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  try {
+    rmSync(here, { recursive: true, force: true, maxRetries: 6, retryDelay: 100 });
+  } catch (error) {
+    if (process.env.GITHUB_ACTIONS !== "true" || error.code !== "ENOTEMPTY") throw error;
+    console.warn("A browser helper still has the temporary profile open. The hosted runner will discard it.");
+  }
 }
