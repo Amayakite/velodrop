@@ -16,6 +16,8 @@ GitHub 预发行包使用 ad-hoc 签名，尚未经过 Apple 公证。也可以�
 
 Mac 应用和浏览器扩展均支持简体中文和英文，分别跟随 macOS 和浏览器的界面语言。Firefox 使用独立的 Gecko manifest，但与 Chromium 版共享全部扩展代码。
 
+[隐私政策 / Privacy Policy](docs/PRIVACY.md)
+
 ## 使用
 
 - 从「应用程序」打开 VeloDrop 会显示下载窗口。关闭窗口后，仍可通过菜单栏的下载箭头或 Dock 打开窗口。浏览器自动接管时默认打开下载窗口，可在设置中关闭。
