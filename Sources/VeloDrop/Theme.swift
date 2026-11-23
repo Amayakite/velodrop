@@ -240,6 +240,7 @@ struct SectionEyebrow: View {
 }
 
 struct VDPrimaryButtonStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
     var compact = false
 
     func makeBody(configuration: Configuration) -> some View {
@@ -249,9 +250,9 @@ struct VDPrimaryButtonStyle: ButtonStyle {
             .padding(.horizontal, compact ? 10 : 14)
             .frame(height: compact ? 26 : 30)
             .background(VD.accentGradient, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
-            .shadow(color: VD.accent.opacity(configuration.isPressed ? 0.15 : 0.28),
+            .shadow(color: VD.accent.opacity(isEnabled ? (configuration.isPressed ? 0.15 : 0.28) : 0),
                     radius: configuration.isPressed ? 2 : 5, x: 0, y: 2)
-            .opacity(configuration.isPressed ? 0.86 : 1)
+            .opacity(isEnabled ? (configuration.isPressed ? 0.86 : 1) : 0.42)
     }
 }
 

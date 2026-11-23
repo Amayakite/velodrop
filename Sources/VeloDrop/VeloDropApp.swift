@@ -46,26 +46,43 @@ final class AppLifecycle: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     func applicationDidBecomeActive(_ notification: Notification) {
-        foregroundWindow?.makeKeyAndOrderFront(nil)
+        if let foregroundWindow, foregroundWindow.isVisible { foregroundWindow.makeKeyAndOrderFront(nil) }
     }
 
     private var welcomeWindow: NSWindow?
     private var settingsWindow: NSWindow?
     private var confirmationWindow: NSWindow?
     private var confirmingID: UUID?
+    private var confirmationUpdatePending = false
     private var progressWindows: [UUID: NSWindow] = [:]
 
-    func showConfirmation() {
+    private func scheduleConfirmationUpdate() {
+        guard !confirmationUpdatePending else { return }
+        confirmationUpdatePending = true
+        // Finish the current button/keyboard event before moving key-window focus.
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.confirmationUpdatePending = false
+            self.updateConfirmationWindow()
+        }
+    }
+
+    private func updateConfirmationWindow() {
         if let window = confirmationWindow, confirmingID == model.confirmation?.id {
             present(window)
             return
         }
+        if let previous = confirmationWindow {
+            previous.makeFirstResponder(nil)
+            if foregroundWindow === previous { foregroundWindow = nil }
+            confirmationWindow = nil
+            previous.close()
+        }
         confirmingID = model.confirmation?.id
-        confirmationWindow?.orderOut(nil)
         confirmationWindow = nil
         guard let item = model.confirmation else { return }
         confirmationWindow = makeWindow(title: String(localized: "Confirm Download")) {
-            DownloadConfirmationView(transfer: item, model: model)
+            DownloadConfirmationView(transfer: item, model: model).id(item.id)
         }
         confirmationWindow?.titleVisibility = .hidden
         confirmationWindow?.titlebarAppearsTransparent = true
@@ -88,8 +105,8 @@ final class AppLifecycle: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     func windowShouldClose(_ sender: NSWindow) -> Bool {
-        if sender === confirmationWindow, let item = model.confirmation {
-            model.cancel(item)
+        if sender === confirmationWindow {
+            if let item = model.confirmation, item.id == confirmingID { model.cancel(item) }
             return false
         }
         return true
@@ -118,19 +135,18 @@ final class AppLifecycle: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let background = ProcessInfo.processInfo.environment["VELODROP_BACKGROUND_LAUNCH"] == "1"
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
-            self.model.onConfirmationChanged = { [weak self] in self?.showConfirmation() }
+            self.model.onConfirmationChanged = { [weak self] in self?.scheduleConfirmationUpdate() }
             self.model.onProgress = { [weak self] id in self?.openProgress(id) }
             self.model.onBrowserIntake = { [weak self] in
                 guard let self else { return }
-                if self.model.confirmation != nil { self.showConfirmation() }
+                if self.model.confirmation != nil { self.scheduleConfirmationUpdate() }
                 else { self.openDownloads() }
             }
-            if self.model.confirmation != nil { self.showConfirmation() }
+            if self.model.confirmation != nil { self.scheduleConfirmationUpdate() }
             self.model.showPendingIntake()
             if settingsRequest {
                 self.openDownloads()
-                self.openPreferences()
-                self.presentEdgeSettings()
+                self.openBrowserPreferences()
             } else if !background && self.model.confirmation == nil {
                 self.openDownloads()
                 if !UserDefaults.standard.bool(forKey: "welcomeCompleted") { self.openWelcome() }
@@ -151,15 +167,7 @@ final class AppLifecycle: NSObject, NSApplicationDelegate, NSWindowDelegate {
             // running app can receive a stale one after an interrupted launch.
             try? FileManager.default.removeItem(
                 at: self.model.workspace.root.appendingPathComponent("open-settings"))
-            self.openPreferences()
-            self.presentEdgeSettings()
-        }
-    }
-
-    private func presentEdgeSettings() {
-        // Let the settings hosting view subscribe before switching sections.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-            NotificationCenter.default.post(name: .velodropOpenEdgeSettings, object: nil)
+            self.openBrowserPreferences()
         }
     }
 
@@ -186,7 +194,7 @@ final class AppLifecycle: NSObject, NSApplicationDelegate, NSWindowDelegate {
     func openWelcome() {
         if welcomeWindow == nil {
             welcomeWindow = makeWindow(title: "VeloDrop") {
-                WelcomeView(model: model, openPreferences: openPreferences) { [weak self] in
+                WelcomeView(model: model, openBrowserPreferences: openBrowserPreferences) { [weak self] in
                     UserDefaults.standard.set(true, forKey: "welcomeCompleted")
                     self?.welcomeWindow?.close()
                     self?.openDownloads()
@@ -206,10 +214,20 @@ final class AppLifecycle: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     func openPreferences() {
+        openPreferences(showBrowsers: false)
+    }
+
+    private func openBrowserPreferences() {
+        openPreferences(showBrowsers: true)
+    }
+
+    private func openPreferences(showBrowsers: Bool) {
         if settingsWindow == nil {
             settingsWindow = makeWindow(title: String(localized: "VeloDrop Settings")) {
-                PreferencesView(model: model)
+                PreferencesView(model: model, showBrowsers: showBrowsers)
             }
+        } else if showBrowsers {
+            NotificationCenter.default.post(name: .velodropOpenBrowserSettings, object: nil)
         }
         present(settingsWindow)
     }
@@ -218,7 +236,7 @@ final class AppLifecycle: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if downloadsWindow == nil {
             downloadsWindow = makeWindow(title: "VeloDrop",
                                          contentSize: NSSize(width: 1100, height: 728)) {
-                DownloadsPanel(model: model, inWindow: true, openPreferences: openPreferences, openDownloads: openDownloads)
+                DownloadsPanel(model: model, openPreferences: openPreferences, openBrowserPreferences: openBrowserPreferences)
                     .frame(minWidth: 820, minHeight: 540)
             }
             downloadsWindow?.styleMask.insert([.resizable, .fullSizeContentView])

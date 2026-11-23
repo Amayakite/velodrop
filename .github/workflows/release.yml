@@ -69,7 +69,8 @@ jobs:
           swift run -c release VeloCoreChecks
           plutil -lint Resources/zh-Hans.lproj/Localizable.strings
           for file in Extension/*.js; do node --check "$file"; done
-          bash -n Scripts/package.sh Scripts/build-engine.sh
+          for file in Scripts/*.sh; do bash -n "$file"; done
+          for file in Scripts/*.mjs; do node --check "$file"; done
 
       - name: Cache aria2 build
         uses: actions/cache@v6
@@ -78,7 +79,20 @@ jobs:
           key: aria2-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Scripts/build-engine.sh', 'Scripts/aria2-scoped-headers.patch') }}
 
       - name: Build DMG
-        run: Scripts/package.sh .dist
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+          WEB_EXT_API_KEY: ${{ secrets.WEB_EXT_API_KEY }}
+          WEB_EXT_API_SECRET: ${{ secrets.WEB_EXT_API_SECRET }}
+        run: |
+          signed="$RUNNER_TEMP/VeloDrop-Firefox.xpi"
+          if gh release download "$RELEASE_TAG" --pattern VeloDrop-Firefox.xpi --output "$signed" 2>/dev/null; then
+            export VELODROP_FIREFOX_XPI="$signed"
+          fi
+          Scripts/package.sh .dist
+
+      - name: Verify Chrome, Edge, and Firefox
+        run: bash Scripts/browser-checks.sh .dist/VeloDrop.app
 
       - name: Verify DMG and write checksum
         run: |
@@ -99,9 +113,11 @@ jobs:
           cat .dist/SHA256SUMS.txt
 
       - name: Prepare release notes
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
         run: |
           set -euo pipefail
-          version="${{ steps.version.outputs.version }}"
+          version="$RELEASE_VERSION"
           awk -v ver="$version" '
             index($0, "## [" ver "]") == 1 { capture = 1; next }
             capture && /^## / { exit }
@@ -117,9 +133,14 @@ jobs:
           - **安装**：下载 `VeloDrop-VERSION-macos-arm64.dmg`，打开后双击「Install VeloDrop」。安装器会退出正在运行的旧版本、替换「应用程序」中的应用并重新打开。
           - **要求**：Apple 芯片，macOS 14 或更新版本。
           - **签名**：ad-hoc 签名，尚未经过 Apple 公证；首次打开如被系统拦截，请在 Finder 中右键「Install VeloDrop.app」选择「打开」。
-          - **升级**：直接再次运行安装器即可，无需先手动退出旧版本。从 0.6.0 起扩展会自动重新加载；从更早版本升级时，请在 Edge 扩展页重新加载一次。
+          - **升级**：直接再次运行安装器即可。若浏览器仍显示旧版扩展，请在该浏览器的扩展管理页重新加载 VeloDrop。
           EOF
           sed -i '' "s/VERSION/$version/g" release-notes.md
+          if [ -f .dist/VeloDrop-Firefox.xpi ]; then
+            printf '\n- **Firefox**：设置的「浏览器」页可以打开随包提供的已签名扩展。\n' >> release-notes.md
+          else
+            printf '\n- **Firefox**：设置的「浏览器」页提供临时载入入口，重启 Firefox 后需重新载入。\n' >> release-notes.md
+          fi
 
       - name: Upload release artifact
         uses: actions/upload-artifact@v7
@@ -128,22 +149,27 @@ jobs:
           path: |
             .dist/*.dmg
             .dist/SHA256SUMS.txt
+            .dist/VeloDrop-Firefox.xpi
           include-hidden-files: true
           retention-days: 30
 
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
         run: |
           set -euo pipefail
           command -v gh >/dev/null || brew install gh
-          tag="${{ steps.version.outputs.tag }}"
-          version="${{ steps.version.outputs.version }}"
+          tag="$RELEASE_TAG"
+          version="$RELEASE_VERSION"
+          assets=(.dist/*.dmg .dist/SHA256SUMS.txt)
+          if [ -f .dist/VeloDrop-Firefox.xpi ]; then assets+=(.dist/VeloDrop-Firefox.xpi); fi
           if gh release view "$tag" >/dev/null 2>&1; then
-            gh release upload "$tag" .dist/*.dmg .dist/SHA256SUMS.txt --clobber
+            gh release upload "$tag" "${assets[@]}" --clobber
             gh release edit "$tag" --title "VeloDrop $version" --notes-file release-notes.md
           else
-            gh release create "$tag" .dist/*.dmg .dist/SHA256SUMS.txt \
+            gh release create "$tag" "${assets[@]}" \
               --verify-tag --title "VeloDrop $version" \
               --notes-file release-notes.md --latest
           fi

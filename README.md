@@ -7,9 +7,10 @@ VeloDrop 是一款原生 macOS 下载器。菜单栏图标打开下载窗口，�
 ## 安装
 
 1. 从 [GitHub Releases](https://github.com/Amayakite/velodrop/releases) 下载 DMG，双击打开，再双击「Install VeloDrop」。安装器会自动退出正在运行的旧版本、原位替换「应用程序」里的 VeloDrop 并重新打开，升级时不需要先手动退出旧版本。现成安装包适用于 Apple 芯片和 macOS 14 或更新版本。
-2. 打开 VeloDrop 后，会显示下载窗口。点击「浏览器设置」或设置齿轮，在「浏览器」页点击「配置浏览器」。VeloDrop 会为已安装的浏览器注册连接器、打开扩展页，并复制扩展文件夹路径。
-3. 在 Chromium 浏览器中打开「开发人员模式」，点击「加载解压缩的扩展」，在选择文件夹窗口按 **⇧⌘G**，粘贴路径并按回车，再点击「选择文件夹」。多个 Chromium 浏览器可以共用同一个扩展文件夹。设置里也可以单独复制路径或在访达中显示扩展文件夹。工具栏图标只显示桥接状态；接管开关、最小文件大小和保留在浏览器的网站都在 VeloDrop 设置里配置。升级应用后扩展会自动重新加载；从 0.6.0 之前的版本升级时，请在扩展页点击一次「重新加载」。首次切换时，可以先停用 FDM 等其他下载接管扩展。
-4. Firefox：在设置里点击 Firefox 行的「在 Firefox 中加载」，路径会复制到剪贴板；在打开的 `about:debugging` 中选择「临时载入附加组件」，按 **⇧⌘G** 粘贴路径并选择 `manifest.json`。临时附加组件在 Firefox 重启后会消失，长期使用需要对扩展签名（AMO unlisted 或自建签名）。
+2. 打开 VeloDrop，在「设置 → 浏览器」找到常用浏览器，点击「连接」，再点「复制路径并打开浏览器」。
+3. Chrome、Edge、Brave 或 Vivaldi 中打开「开发者模式」，点击「加载解压缩的扩展」。在选择文件夹窗口按 **⇧⌘G**、粘贴路径并回车，再点击「选择文件夹」。若列表中已有 VeloDrop，使用扩展的「重新加载」。切换接管扩展时可以先暂停使用 FDM 等其他下载接管扩展。
+4. Firefox 如随包附带签名，可点击「打开已签名的扩展」安装。临时载入时，在打开的 `about:debugging` 中点击「临时载入附加组件」，按 **⇧⌘G** 粘贴路径并选择 `manifest.json`。临时扩展需要在 Firefox 重启后重新载入。
+5. 扩展载入后，可点击浏览器旁的「测试下载」。应用会接管一份本机测试文件并清理测试结果，设置里显示该浏览器是否通过。
 
 GitHub 预发行包使用 ad-hoc 签名，尚未经过 Apple 公证。也可以在本机按下文从源码构建。打包脚本支持现有的 Developer ID 证书。
 
@@ -34,14 +35,14 @@ Mac 应用和浏览器扩展均支持简体中文和英文，分别跟随 macOS 
 ```sh
 Scripts/package.sh
 swift run -c release VeloCoreChecks
-node Scripts/smoke-test.mjs
+bash Scripts/browser-checks.sh
 ```
 
-安装包位于 `.dist/`。设置 `VELODROP_SIGN_IDENTITY` 可用自己的 Developer ID 签名。端到端测试需要安装 Microsoft Edge（测试脚本以 Edge 为基准）和 Node.js 22 或更新版本，使用临时浏览器配置、临时下载目录和本机 HTTP 测试服务。请在测试前退出同一套打包产物。
+安装包位于 `.dist/`。设置 `VELODROP_SIGN_IDENTITY` 可用自己的 Developer ID 签名。端到端测试需要 Chrome、Edge、Firefox、geckodriver 和 Node.js 22 或更新版本。测试使用独立浏览器配置、临时连接器和本机 HTTP 测试服务。请在测试前退出同一套打包产物。
 
 ### 自动构建与发布
 
-- push 和 pull request 会运行 [CI](.github/workflows/ci.yml)：Release 构建、`VeloCoreChecks`、本地化校验、扩展 JavaScript 语法检查和脚本语法检查。
+- push 和 pull request 会运行 Release 构建、核心检查、本地化和脚本校验、打包及三款浏览器的回归测试。见 [CI](.github/workflows/ci.yml)。
 - main 分支的 CI 会额外产出一个可用 Actions artifact 下载的未发布 DMG。
 - 推送 `v*` tag 会触发 [Release](.github/workflows/release.yml)：在 arm64 `macos-15` runner 上重新打包、验证 DMG 与签名、生成 SHA256，并自动创建 GitHub Release。
 - 版本号唯一来源是 `Extension/manifest.json`，发布 tag 必须与它一致。完整步骤、手动重跑、签名与常见问题见 [docs/RELEASING.md](docs/RELEASING.md)，版本记录见 [CHANGELOG.md](CHANGELOG.md)。

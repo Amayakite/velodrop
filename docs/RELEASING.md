@@ -2,8 +2,8 @@
 
 VeloDrop 使用 GitHub Actions 做两件事：
 
-- `.github/workflows/ci.yml`：在 push 和 pull request 上构建、跑核心检查，并在 main 分支产出一个未发布的 DMG artifact。
-- `.github/workflows/release.yml`：推送 `v*` tag 后，在 arm64 macOS runner 上重新构建 DMG、验证镜像和签名、生成 SHA256，并创建 GitHub Release。
+- `.github/workflows/ci.yml` 在 push 和 pull request 上构建并运行核心检查及浏览器回归测试，在 main 分支产出可下载的 DMG。
+- `.github/workflows/release.yml` 在推送 `v*` tag 后重新打包、跑浏览器回归、验证镜像和签名、生成 SHA256，并创建 GitHub Release。
 
 ## 版本号约定
 
@@ -30,6 +30,7 @@ VeloDrop 使用 GitHub Actions 做两件事：
    plutil -lint Resources/zh-Hans.lproj/Localizable.strings
    for file in Extension/*.js; do node --check "$file"; done
    Scripts/package.sh .dist
+   bash Scripts/browser-checks.sh .dist/VeloDrop.app
    hdiutil verify .dist/VeloDrop-*.dmg
    codesign --verify --deep --strict .dist/VeloDrop.app
    codesign --verify --deep --strict ".dist/Install VeloDrop.app"
@@ -72,6 +73,8 @@ DMG 打开后显示「Install VeloDrop」。安装器会退出正在运行的旧
 GitHub 托管 runner 的 `macos-15` 标签当前是 arm64。工作流依赖 `uname -m` 生成架构后缀；如果未来 GitHub 调整 runner 标签，需要同步修改两个 workflow 的 `runs-on`，避免产出错误架构的安装包。
 
 ## 签名与公证
+
+Firefox 的正式安装需要 Mozilla 签名。为 Release 工作流配置 `WEB_EXT_API_KEY` 和 `WEB_EXT_API_SECRET` 后，打包会通过 `web-ext sign --channel=unlisted` 生成 XPI，把它放入 DMG 及 Release。已有对应版本的签名文件时可设置 `VELODROP_FIREFOX_XPI` 直接打包。未配置凭据时，Firefox 仍可临时载入。见 [Mozilla 签名说明](https://extensionworkshop.com/documentation/publish/signing-and-distribution-overview/)。
 
 当前发布流程和本地 `Scripts/package.sh` 默认使用 ad-hoc 签名（`VELODROP_SIGN_IDENTITY=-`），没有 Apple 公证。Release 说明会明确提示用户在 Finder 中右键打开。
 

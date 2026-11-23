@@ -50,18 +50,24 @@ jobs:
           done
 
       - name: Check shell scripts
-        run: bash -n Scripts/package.sh Scripts/build-engine.sh
+        run: |
+          for file in Scripts/*.sh; do bash -n "$file"; done
+          for file in Scripts/*.mjs; do node --check "$file"; done
 
   package:
-    name: Package DMG artifact
+    name: Package and test browsers
     runs-on: macos-15
     needs: verify
-    if: github.event_name != 'pull_request'
     env:
       VELODROP_BUILD_NUMBER: ${{ github.run_number }}
     steps:
       - name: Check out
         uses: actions/checkout@v7
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: "22"
 
       - name: Read version
         id: version
@@ -77,6 +83,9 @@ jobs:
 
       - name: Build DMG
         run: Scripts/package.sh .dist
+
+      - name: Verify Chrome, Edge, and Firefox
+        run: bash Scripts/browser-checks.sh .dist/VeloDrop.app
 
       - name: Verify DMG
         run: |
@@ -98,6 +107,7 @@ jobs:
 
       - name: Upload DMG artifact
         uses: actions/upload-artifact@v7
+        if: github.event_name != 'pull_request'
         with:
           name: VeloDrop-${{ steps.version.outputs.version }}-build-${{ github.run_number }}
           path: |

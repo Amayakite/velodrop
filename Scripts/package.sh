@@ -27,19 +27,39 @@ mkdir -p "$volume"
 staged="$tmp/VeloDrop.app"
 contents="$staged/Contents"
 resources="$contents/Resources"
-mkdir -p "$contents/MacOS" "$contents/Helpers" "$resources/EdgeExtension" "$resources/FirefoxExtension" "$resources/Notices"
+mkdir -p "$contents/MacOS" "$contents/Helpers" "$resources/VeloDropExtension" "$resources/VeloDropFirefoxExtension" "$resources/Notices"
 cp "$bin/VeloDrop" "$contents/MacOS/"
 cp "$bin/VeloBridge" "$engine/aria2c" "$contents/Helpers/"
 cp "$assets/AppIcon.icns" "$resources/"
 cp -R Resources/. "$resources/"
-cp -R Extension/. "$resources/EdgeExtension/"
-cp "$assets"/Icon*.png "$resources/EdgeExtension/"
+cp -R Extension/. "$resources/VeloDropExtension/"
+cp "$assets"/Icon*.png "$resources/VeloDropExtension/"
 # Firefox needs its Gecko manifest and an event-page background, but shares
 # every script with the Chromium build.
-cp -R Extension/. "$resources/FirefoxExtension/"
-cp "$root/Scripts/firefox-manifest.json" "$resources/FirefoxExtension/manifest.json"
-plutil -replace version -string "$version" "$resources/FirefoxExtension/manifest.json"
-cp "$assets"/Icon*.png "$resources/FirefoxExtension/"
+cp -R Extension/. "$resources/VeloDropFirefoxExtension/"
+cp "$root/Scripts/firefox-manifest.json" "$resources/VeloDropFirefoxExtension/manifest.json"
+plutil -replace version -string "$version" "$resources/VeloDropFirefoxExtension/manifest.json"
+cp "$assets"/Icon*.png "$resources/VeloDropFirefoxExtension/"
+# Existing unpacked installations store the original directory's absolute path.
+ln -s VeloDropExtension "$resources/EdgeExtension"
+ln -s VeloDropFirefoxExtension "$resources/FirefoxExtension"
+firefox_xpi="${VELODROP_FIREFOX_XPI:-}"
+if [[ -z "$firefox_xpi" && -n "${WEB_EXT_API_KEY:-}" && -n "${WEB_EXT_API_SECRET:-}" ]]; then
+    mkdir -p "$tmp/firefox-signed"
+    npx --yes web-ext@10.8.0 sign --channel=unlisted \
+        --source-dir "$resources/VeloDropFirefoxExtension" --artifacts-dir "$tmp/firefox-signed"
+    firefox_xpi="$(find "$tmp/firefox-signed" -name '*.xpi' -type f -print -quit)"
+    test -n "$firefox_xpi"
+fi
+if [[ -n "$firefox_xpi" ]]; then
+    unzip -p "$firefox_xpi" manifest.json > "$tmp/signed-manifest.json"
+    test "$(plutil -extract version raw -o - "$tmp/signed-manifest.json")" = "$version"
+    gecko_id="browser_specific_settings.gecko.id"
+    test "$(plutil -extract "$gecko_id" raw -o - "$tmp/signed-manifest.json")" \
+        = "$(plutil -extract "$gecko_id" raw -o - "$resources/VeloDropFirefoxExtension/manifest.json")"
+    unzip -p "$firefox_xpi" META-INF/mozilla.rsa >/dev/null
+    cp "$firefox_xpi" "$resources/VeloDrop-Firefox.xpi"
+fi
 cp "$engine/aria2-1.37.0/COPYING" "$resources/Notices/aria2-COPYING.txt"
 cp "$engine/aria2-1.37.0/LICENSE.OpenSSL" "$resources/Notices/aria2-LICENSE.OpenSSL.txt"
 cp Scripts/build-engine.sh Scripts/aria2-scoped-headers.patch "$resources/Notices/"
@@ -116,5 +136,10 @@ if [[ -e "$app" ]]; then rm -rf "$app"; fi
 if [[ -e "$out/Install VeloDrop.app" ]]; then rm -rf "$out/Install VeloDrop.app"; fi
 mv "$staged" "$app"
 cp -R "$installer" "$out/Install VeloDrop.app"
+if [[ -n "$firefox_xpi" ]]; then
+    cp "$app/Contents/Resources/VeloDrop-Firefox.xpi" "$out/VeloDrop-Firefox.xpi"
+else
+    rm -f "$out/VeloDrop-Firefox.xpi"
+fi
 mv -f "$tmp/$dmg" "$out/$dmg"
 printf '%s\n' "$out/$dmg"

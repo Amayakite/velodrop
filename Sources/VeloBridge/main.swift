@@ -1,4 +1,5 @@
 import AppKit
+import Darwin
 import Foundation
 import VeloCore
 
@@ -14,6 +15,7 @@ private struct Request: Codable {
     var mimeType: String?
     var headers: [String: String]?
     var proxy: BrowserProxy?
+    var extensionVersion: String?
 }
 
 private struct Reply: Encodable {
@@ -22,37 +24,43 @@ private struct Reply: Encodable {
     var appRunning: Bool?
     var rules: BrowserRules?
     var version: String?
+    var browser: BrowserID?
+    var testURL: URL?
 }
 
-private func handle(_ data: Data, bundle: URL) throws -> Reply {
+private func handle(_ data: Data, bundle: URL, browser: BrowserID?) throws -> Reply {
     let request = try JSONDecoder().decode(Request.self, from: data)
     let workspace = Workspace.standard()
     try workspace.prepare()
 
     switch request.action {
     case "ping", "rules":
-        if request.action == "ping" {
-            try Data(String(Date().timeIntervalSince1970).utf8)
-                .write(to: workspace.root.appendingPathComponent("browser-connection"), options: .atomic)
+        let ready = FileManager.default.isExecutableFile(atPath: BundleLayout.engine(in: bundle).path)
+        if ready, request.action == "ping", let browser {
+            try workspace.noteBrowserConnection(browser, connection: BrowserConnection(
+                extensionVersion: request.extensionVersion.map { String($0.prefix(32)) }))
         }
-        let engine = BundleLayout.engine(in: bundle)
-        return Reply(ok: FileManager.default.isExecutableFile(atPath: engine.path),
-                     appRunning: workspace.appIsRunning,
-                     rules: currentRules(in: workspace),
-                     version: appVersion(of: bundle))
+        return Reply(ok: ready, appRunning: workspace.appIsRunning,
+                     rules: currentRules(in: workspace), version: appVersion(of: bundle),
+                     browser: browser, testURL: browser.flatMap { workspace.browserTest($0)?.url })
 
     case "submit", "reserve":
         guard let id = request.id, let url = request.url, let name = request.name,
               !workspace.wasAbandoned(id) else { return Reply(ok: false) }
-        var transfer = try Transfer(id: id, url: url, name: name, fromBrowser: true,
-                                    expectedBytes: request.size.flatMap { $0 > 0 ? $0 : nil })
-        let headers = BrowserHeaders(request.headers ?? [:])
+        let test = browser.flatMap { workspace.browserTest($0) }.flatMap { $0.url == url ? $0 : nil }
+        let size = test == nil ? request.size.flatMap { $0 > 0 ? $0 : nil } : Int64(BrowserTest.bytes)
+        var transfer = try Transfer(id: id, url: url, name: name, fromBrowser: true, expectedBytes: size)
+        transfer.sourceBrowser = browser
+        transfer.browserTestID = test?.id
+        let headers = BrowserHeaders(test == nil ? request.headers ?? [:] : [:])
         transfer.sourceURL = Transfer.displayURL(request.source ?? url)
         transfer.referringPage = Transfer.displayURL(request.referrer)
         transfer.mimeType = request.mimeType.map { String($0.prefix(128)) }
         transfer.browserHeaderNames = request.headers.map { _ in headers.fields.keys.sorted() }
         transfer.requiresBrowserSession = headers.requiresSession
-        if let proxy = request.proxy, proxy.mode == .fixed {
+        if test != nil {
+            transfer.browserProxy = .direct
+        } else if let proxy = request.proxy, proxy.mode == .fixed {
             guard let endpoint = proxy.endpoint, let verified = BrowserProxy.http(endpoint) else {
                 return Reply(ok: false)
             }
@@ -135,7 +143,7 @@ private func launch(_ bundle: URL, background: Bool = true) throws {
     let identifier = Bundle(url: bundle)?.bundleIdentifier ?? BundleLayout.identifier
     if !NSRunningApplication.runningApplications(withBundleIdentifier: identifier).isEmpty {
         // The app decides when a capture should take focus. Activating here
-        // would pull Edge to the background for every ordinary download.
+        // would pull the source browser to the background for every ordinary download.
         return
     }
     let process = Process()
@@ -166,15 +174,40 @@ private func exactly(_ length: Int) throws -> Data {
     return bytes
 }
 
+// All Chromium variants share the extension ID and some mask their user
+// agent. The app bundle of the process that launched the host identifies the browser.
+private func sourceBrowser() -> BrowserID? {
+    var pid = getppid()
+    for _ in 0..<5 where pid > 1 {
+        var executable = [CChar](repeating: 0, count: Int(MAXPATHLEN) * 4)
+        if proc_pidpath(pid, &executable, UInt32(executable.count)) > 0 {
+            var url = URL(fileURLWithPath: String(cString: executable))
+            while url.pathComponents.count > 1 {
+                if url.pathExtension == "app", let identifier = Bundle(url: url)?.bundleIdentifier,
+                   let browser = BrowserID(bundleIdentifier: identifier) {
+                    return browser
+                }
+                url.deleteLastPathComponent()
+            }
+        }
+        var process = proc_bsdinfo()
+        let size = Int32(MemoryLayout<proc_bsdinfo>.stride)
+        guard proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &process, size) == size else { return nil }
+        pid = pid_t(process.pbi_ppid)
+    }
+    return nil
+}
+
 private func processMessages() throws {
     let bundle = URL(fileURLWithPath: CommandLine.arguments[0]).resolvingSymlinksInPath()
         .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+    let browser = sourceBrowser()
     while let prefix = try FileHandle.standardInput.read(upToCount: 4), !prefix.isEmpty {
         let lengthBytes = prefix + (prefix.count < 4 ? try exactly(4 - prefix.count) : Data())
         let length = lengthBytes.enumerated().reduce(0) { $0 | (Int($1.element) << ($1.offset * 8)) }
         guard (1...256_000).contains(length) else { throw TransferError.invalidResponse }
         let request = try exactly(length)
-        let reply = (try? handle(request, bundle: bundle)) ?? Reply(ok: false)
+        let reply = (try? handle(request, bundle: bundle, browser: browser)) ?? Reply(ok: false)
         let data = try JSONEncoder().encode(reply)
         let prefix = Data((0..<4).map { UInt8(truncatingIfNeeded: data.count >> ($0 * 8)) })
         try FileHandle.standardOutput.write(contentsOf: prefix + data)

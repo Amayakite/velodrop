@@ -12,45 +12,39 @@ enum BrowserFamily {
 /// A browser that can load the VeloDrop extension and read a user-level native
 /// messaging host manifest on macOS.
 struct SupportedBrowser: Identifiable {
-    let id: String
+    let id: BrowserID
     let name: String
     let family: BrowserFamily
-    let bundleIdentifier: String
     /// Path under ~/Library/Application Support that owns NativeMessagingHosts.
     let supportFolder: String
     let installationAddress: String
     let logoName: String
 
     static let supported: [SupportedBrowser] = [
-        SupportedBrowser(id: "chrome", name: "Google Chrome", family: .chromium,
-                         bundleIdentifier: "com.google.Chrome",
+        SupportedBrowser(id: .chrome, name: "Google Chrome", family: .chromium,
                          supportFolder: "Google/Chrome",
                          installationAddress: "chrome://extensions/",
                          logoName: "chrome"),
-        SupportedBrowser(id: "edge", name: "Microsoft Edge", family: .chromium,
-                         bundleIdentifier: "com.microsoft.edgemac",
+        SupportedBrowser(id: .edge, name: "Microsoft Edge", family: .chromium,
                          supportFolder: "Microsoft Edge",
                          installationAddress: "edge://extensions/",
                          logoName: "edge"),
-        SupportedBrowser(id: "brave", name: "Brave", family: .chromium,
-                         bundleIdentifier: "com.brave.Browser",
+        SupportedBrowser(id: .brave, name: "Brave", family: .chromium,
                          supportFolder: "BraveSoftware/Brave-Browser",
                          installationAddress: "brave://extensions/",
                          logoName: "brave"),
-        SupportedBrowser(id: "vivaldi", name: "Vivaldi", family: .chromium,
-                         bundleIdentifier: "com.vivaldi.Vivaldi",
+        SupportedBrowser(id: .vivaldi, name: "Vivaldi", family: .chromium,
                          supportFolder: "Vivaldi",
                          installationAddress: "vivaldi://extensions/",
                          logoName: "vivaldi"),
-        SupportedBrowser(id: "firefox", name: "Firefox", family: .firefox,
-                         bundleIdentifier: "org.mozilla.firefox",
+        SupportedBrowser(id: .firefox, name: "Firefox", family: .firefox,
                          supportFolder: "",
                          installationAddress: "about:debugging#/runtime/this-firefox",
                          logoName: "firefox"),
     ]
 
     var appURL: URL? {
-        NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleIdentifier)
+        NSWorkspace.shared.urlForApplication(withBundleIdentifier: id.bundleIdentifier)
     }
 
     var isInstalled: Bool { appURL != nil }
@@ -69,7 +63,12 @@ struct SupportedBrowser: Identifiable {
     }
 
     var isRegistered: Bool {
-        FileManager.default.fileExists(atPath: hostManifestURL.path)
+        guard let data = try? Data(contentsOf: hostManifestURL),
+              let manifest = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let path = manifest["path"] as? String else { return false }
+        let expected = BundleLayout.bridge(in: Bundle.main.bundleURL)
+        return URL(fileURLWithPath: path).resolvingSymlinksInPath() == expected.resolvingSymlinksInPath()
+            && FileManager.default.isExecutableFile(atPath: path)
     }
 
     var icon: NSImage? {
@@ -81,10 +80,6 @@ struct SupportedBrowser: Identifiable {
         // The development build has no bundled resources; fall back to the
         // installed browser's own icon.
         return appURL.map { NSWorkspace.shared.icon(forFile: $0.path) }
-    }
-
-    var actionTitle: LocalizedStringKey {
-        family == .firefox ? "Load in Firefox" : "Open Extensions"
     }
 
     func extensionFolder(in bundle: URL) -> URL {
@@ -105,15 +100,18 @@ struct SupportedBrowser: Identifiable {
     }
 
     func openInstallPage() {
-        guard let appURL, let url = URL(string: installationAddress) else { return }
+        if let url = URL(string: installationAddress) { open(url) }
+    }
+
+    func open(_ url: URL, activates: Bool = true) {
+        guard let appURL else { return }
+        let configuration = NSWorkspace.OpenConfiguration()
+        configuration.activates = activates
         NSWorkspace.shared.open([url], withApplicationAt: appURL,
-                                configuration: NSWorkspace.OpenConfiguration(),
+                                configuration: configuration,
                                 completionHandler: nil)
     }
 
-    static var firstInstalled: SupportedBrowser? {
-        supported.first { $0.isInstalled }
-    }
 }
 
 /// Writes the native messaging host manifest that lets a browser discover
@@ -175,19 +173,10 @@ enum BrowserConnector {
         return identifier
     }
 
-    /// Registers every installed supported browser and returns the count.
-    @discardableResult
-    static func registerAll(bundle: URL) throws -> Int {
-        var count = 0
-        for browser in SupportedBrowser.supported where browser.isInstalled {
-            if try register(browser, bundle: bundle) { count += 1 }
-        }
-        return count
-    }
-
-    static func removeAll() {
-        for browser in SupportedBrowser.supported {
-            try? FileManager.default.removeItem(at: browser.hostManifestURL)
+    static func remove(_ browser: SupportedBrowser) throws {
+        let manifest = browser.hostManifestURL
+        if FileManager.default.fileExists(atPath: manifest.path) {
+            try FileManager.default.removeItem(at: manifest)
         }
     }
 }

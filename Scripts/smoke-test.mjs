@@ -1,23 +1,32 @@
 import assert from "node:assert/strict";
 import { spawn, execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createServer, request as httpRequest } from "node:http";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 
 const app = resolve(process.argv[2] ?? ".dist/VeloDrop.app");
-const edge = process.env.VELODROP_EDGE ?? "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge";
+const browserID = process.env.VELODROP_BROWSER ?? "edge";
+const browserName = { edge: "Microsoft Edge", chrome: "Google Chrome" }[browserID];
+assert.ok(browserName, "Set VELODROP_BROWSER to chrome or edge.");
+const binary = process.env.VELODROP_BROWSER_BINARY ?? `/Applications/${browserName}.app/Contents/MacOS/${browserName}`;
 const here = mkdtempSync(join(tmpdir(), "velodrop-smoke-"));
-const profile = join(here, "edge");
+const profile = join(here, "profile");
 const home = join(here, "app-data");
 const nativeDownloads = join(here, "native");
-const edgeDownloads = join(here, "browser");
+const browserDownloads = join(here, "browser");
+const hostName = "com.amayakite.velodrop.smoke_" + crypto.randomUUID().replaceAll("-", "");
+const support = browserID === "chrome" ? "Google/Chrome" : "Microsoft Edge";
+const hostDir = join(homedir(), "Library/Application Support", support, "NativeMessagingHosts");
+const hostManifest = join(hostDir, hostName + ".json");
+const profileHostDir = join(profile, "NativeMessagingHosts");
+const profileHostManifest = join(profileHostDir, hostName + ".json");
 const env = { ...process.env, VELODROP_DATA: home, VELODROP_DESTINATION: nativeDownloads };
 const smokeLocale = process.env.VELODROP_SMOKE_LOCALE;
 const appLog = [];
-const edgeLog = [];
+const browserLog = [];
 const calls = [];
 const proxied = [];
 let liveParallelRequests = 0;
@@ -220,30 +229,41 @@ let desktop;
 let launchedDesktop;
 let requestedDesktopLaunch = false;
 let browser;
+let registered = false;
 try {
-  assert.ok(existsSync(edge), "Microsoft Edge is required for the browser smoke test.");
+  assert.ok(existsSync(binary), browserName + " is required for the browser smoke test.");
   assert.ok(existsSync(app), "Run Scripts/package.sh before testing.");
   await new Promise(resolve => fixture.listen(0, "127.0.0.1", resolve));
   await new Promise(resolve => proxy.listen(0, "127.0.0.1", resolve));
   const base = "http://127.0.0.1:" + fixture.address().port;
-  const extension = join(app, "Contents/Resources/EdgeExtension");
+  const extensionFolder = browserID === "edge" ? "EdgeExtension" : "VeloDropExtension";
+  const extension = join(here, "extension");
+  cpSync(join(app, "Contents/Resources", extensionFolder), extension, { recursive: true, dereference: true });
   const manifest = JSON.parse(readFileSync(join(extension, "manifest.json")));
+  assert.equal(manifest.name, "VeloDrop");
   const id = createHash("sha256").update(Buffer.from(manifest.key, "base64")).digest("hex").slice(0, 32)
     .replace(/[0-9a-f]/g, value => String.fromCharCode(97 + parseInt(value, 16)));
 
-  const hostDir = join(profile, "NativeMessagingHosts");
+  const worker = join(extension, "worker.js");
+  const original = readFileSync(worker, "utf8");
+  const adapted = original.replace('const host = "com.amayakite.velodrop";', 'const host = "' + hostName + '";');
+  assert.notEqual(adapted, original, "Use only the test's temporary host.");
+  writeFileSync(worker, adapted);
   mkdirSync(hostDir, { recursive: true });
-  const hostManifest = join(hostDir, "com.amayakite.velodrop.json");
-  writeFileSync(hostManifest, JSON.stringify({
-    name: "com.amayakite.velodrop",
+  const host = {
+    name: hostName,
     description: "VeloDrop smoke test",
     type: "stdio",
     path: join(app, "Contents/Helpers/VeloBridge"),
     allowed_origins: ["chrome-extension://" + id + "/"],
-  }));
+  };
+  writeFileSync(hostManifest, JSON.stringify(host), { flag: "wx" });
+  registered = true;
+  mkdirSync(profileHostDir, { recursive: true });
+  writeFileSync(profileHostManifest, JSON.stringify(host));
 
   // Takeover rules belong to the app now. The bridge reads this file, so write
-  // it before Edge starts, and keep the argument-domain overrides aligned so a
+  // it before the browser starts, and keep argument-domain overrides aligned so a
   // developer's real preferences cannot leak into the test run.
   const rules = { enabled: true, minimumMiB: 2, excludedHosts: "", reuseSessionHeaders: true };
   const writeRules = change => writeFileSync(join(home, "browser-rules.json"),
@@ -265,15 +285,15 @@ try {
   mkdirSync(profileDefault, { recursive: true });
   writeFileSync(join(profileDefault, "Preferences"), JSON.stringify({
     profile: { default_content_setting_values: { automatic_downloads: 1 } },
-    download: { default_directory: edgeDownloads, prompt_for_download: false, directory_upgrade: true },
+    download: { default_directory: browserDownloads, prompt_for_download: false, directory_upgrade: true },
   }));
 
-  browser = child(edge, [
+  browser = child(binary, [
     "--headless=new", "--no-first-run", "--no-default-browser-check", "--disable-background-networking",
     "--remote-debugging-pipe", "--enable-unsafe-extension-debugging", "--user-data-dir=" + profile,
     "--load-extension=" + extension,
     ...(smokeLocale ? ["--lang=" + smokeLocale, "-AppleLanguages", "(" + smokeLocale + ")"] : []),
-  ], { env, stdio: ["ignore", "ignore", "pipe", "pipe", "pipe"] }, edgeLog);
+  ], { env, stdio: ["ignore", "ignore", "pipe", "pipe", "pipe"] }, browserLog);
   const cdp = new CDP(browser);
   await cdp.send("Browser.getVersion");
   let loaded;
@@ -282,11 +302,22 @@ try {
   } catch (error) {
     console.log(String(error));
   }
-  assert.ok(!loaded || loaded.id === id, "Native host matches the ID loaded by Edge.");
+  assert.ok(!loaded || loaded.id === id, "The loaded extension matches the native host.");
   const page = await cdp.tab(base);
   const popup = await cdp.tab("chrome-extension://" + id + "/popup.html");
-  await waitFor("Edge extension connection", async () =>
-    (await cdp.run(popup, 'document.querySelector("#status")?.dataset.connected')) === "true", 6000);
+  await waitFor("extension popup loaded", () =>
+    cdp.run(popup, 'typeof globalThis.chrome?.runtime?.sendNativeMessage === "function"'), 8000);
+  const connectionReply = await cdp.run(popup, `chrome.runtime.sendNativeMessage(
+    ${JSON.stringify(hostName)}, { action: "ping", extensionVersion: chrome.runtime.getManifest().version }
+  ).catch(error => ({ error: String(error) }))`);
+  assert.equal(connectionReply.ok, true, JSON.stringify(connectionReply));
+  assert.equal(connectionReply.version, manifest.version);
+  await waitFor("extension connection", async () =>
+    (await cdp.run(popup, 'document.querySelector("#status")?.dataset.connected')) === "true", 8000);
+  const connectionFile = join(home, "Browsers", browserID + "-connection.json");
+  await waitFor("browser identity receipt", () => existsSync(connectionFile), 8000);
+  const connection = JSON.parse(readFileSync(connectionFile));
+  assert.equal(connection.extensionVersion, manifest.version);
   const popupLabels = await cdp.run(popup, `({
     language: document.documentElement.lang,
     takeover: document.querySelector("#takeover").textContent,
@@ -304,7 +335,7 @@ try {
   } else {
     assert.ok(popupLabels.takeover && popupLabels.connection);
   }
-  console.log("Edge extension loaded and connected to the native host (" + popupLabels.language + ").");
+  console.log(browserName + " connected to the native host (" + popupLabels.language + ").");
 
   const start = route => cdp.run(page, `(() => {
     const link = document.createElement("a"); link.href = ${JSON.stringify(base + "/" + route)};
@@ -318,8 +349,8 @@ try {
   desktop = startDesktop();
   await waitFor("test desktop startup", runningDesktop);
   await start("parallel.zip");
-  launchedDesktop = await waitFor("Edge starting the desktop app", runningDesktop);
-  await waitFor("original Edge item removed before completion", async () =>
+  launchedDesktop = await waitFor("desktop running during takeover", runningDesktop);
+  await waitFor("original browser item removed before completion", async () =>
     calls.some(call => call.route === "parallel.zip" && !call.browser) &&
     !(await browserState("parallel.zip")) &&
     !records().some(item => item.name === "parallel.zip" && item.state === "completed")
@@ -327,32 +358,34 @@ try {
   await waitFor("segmented download", () => new Set(calls.filter(
     call => call.route === "parallel.zip" && !call.browser && call.range).map(call => call.range)).size >= 2);
   await waitFor("downloaded file", () => records().some(item => item.name === "parallel.zip" && item.state === "completed"));
-  await waitFor("successful takeover removed from Edge", async () => !(await browserState("parallel.zip")));
+  await waitFor("successful takeover cleared from the browser", async () => !(await browserState("parallel.zip")));
   assert.ok(peakParallelRequests >= 2, "Segment requests overlap in time.");
+  assert.equal(records().find(item => item.name === "parallel.zip").sourceBrowser, browserID);
   assert.equal(sha256(join(nativeDownloads, "parallel.zip")), digest);
-  assert.equal(existsSync(join(edgeDownloads, "parallel.zip")), false);
-  console.log(`Edge launched VeloDrop, aria2 used ${peakParallelRequests} concurrent requests, and the final SHA-256 matched.`);
+  assert.equal(existsSync(join(browserDownloads, "parallel.zip")), false);
+  console.log(`VeloDrop took over, aria2 used ${peakParallelRequests} concurrent requests, and the final SHA-256 matched.`);
 
   await start("fallback.zip");
   await waitFor("aria2 rejection", () => calls.some(call => call.route === "fallback.zip" && !call.browser));
-  await waitFor("Edge retried the original URL", async () => (await browserState("fallback.zip"))?.state === "complete");
-  assert.equal(sha256(join(edgeDownloads, "fallback.zip")), digest);
+  await waitFor("browser retried the original URL", async () => (await browserState("fallback.zip"))?.state === "complete");
+  assert.equal(sha256(join(browserDownloads, "fallback.zip")), digest);
   assert.equal(existsSync(join(nativeDownloads, "fallback.zip")), false);
   assert.ok(records().some(item => item.name === "fallback.zip" && item.state === "failed"));
   assert.equal((await browserState("fallback.zip")).byExtensionId, id);
-  console.log("After the server rejected aria2, Edge retried the original URL and saved identical bytes.");
+  console.log("After the server rejected aria2, the browser retried the original URL and saved identical bytes.");
 
   const signedRoute = "signed.zip?ticket=fixture";
   await start(signedRoute);
-  const pausedOriginal = await waitFor("Edge paused the original signed download", async () => {
+  const pausedOriginal = await waitFor("original signed download paused", async () => {
     const item = await browserState(signedRoute);
     return item?.paused ? item : null;
   });
-  await waitFor("Edge resumed the original signed download", async () => {
+  await waitFor("browser resumed the original signed download", async () => {
     const item = await browserState(signedRoute);
     return item?.id === pausedOriginal.id && item.state === "complete";
   });
-  assert.equal(sha256(join(edgeDownloads, "signed.zip")), digest);
+  assert.equal(sha256(join(browserDownloads, "signed.zip")), digest);
+  console.log("The browser resumed the original signed download and the SHA-256 matched.");
 
   const networkGranted = await cdp.run(popup, `chrome.permissions.contains({
     permissions: ["proxy"], origins: ["http://*/*", "https://*/*"]
@@ -365,7 +398,7 @@ try {
     assert.ok(captured.browserHeaderNames.includes("Cookie"));
     assert.equal(JSON.stringify(captured).includes("vd_fixture"), false);
     assert.equal(sha256(join(nativeDownloads, "captured-headers.zip")), digest);
-    console.log("Edge request capture forwarded the test session cookie to the original URL.");
+    console.log("Request capture forwarded the test session cookie to the original URL.");
   }
 
   const authenticatedID = crypto.randomUUID();
@@ -394,10 +427,10 @@ try {
 
   writeRules({ excludedHosts: "127.0.0.1" });
   await start("site-excluded.zip");
-  await waitFor("excluded site left in Edge", async () => (await browserState("site-excluded.zip"))?.state === "complete");
+  await waitFor("excluded site left in the browser", async () => (await browserState("site-excluded.zip"))?.state === "complete");
   assert.equal(records().some(item => item.name === "site-excluded.zip"), false);
   writeRules({});
-  console.log("The excluded site downloaded in Edge without a VeloDrop entry.");
+  console.log("The excluded site downloaded in the browser without a VeloDrop entry.");
 
   const restartID = crypto.randomUUID();
   assert.equal(nativeMessage({
@@ -415,21 +448,25 @@ try {
   assert.equal(sha256(join(nativeDownloads, "restart.zip")), digest);
   console.log("Relaunch resumed the partial file using nonzero range offsets; SHA-256 matched.");
 
-  rmSync(hostManifest);
+  writeFileSync(hostManifest, JSON.stringify({ ...host, path: "/usr/bin/false" }));
+  writeFileSync(profileHostManifest, JSON.stringify({ ...host, path: "/usr/bin/false" }));
   await start("bridge-unavailable.zip");
-  await waitFor("Edge download without the native host", async () =>
+  await waitFor("browser download without the native host", async () =>
     (await browserState("bridge-unavailable.zip"))?.state === "complete");
-  assert.equal(statSync(join(edgeDownloads, "bridge-unavailable.zip")).size, downloadSize);
+  assert.equal(statSync(join(browserDownloads, "bridge-unavailable.zip")).size, downloadSize);
   assert.equal(calls.some(call => call.route === "bridge-unavailable.zip" && !call.browser), false);
-  console.log("Without the native host, Edge completed the file on its own.");
+  console.log("Without the native host, the browser completed the file on its own.");
 
   await waitFor("idle aria2 process exit", () => {
     const processList = execFileSync("ps", ["-axo", "ppid,comm"], { encoding: "utf8" });
     return !processList.split("\n").some(line => new RegExp("^\\s*" + desktop.pid + "\\s+.*aria2c$").test(line));
   });
   const usage = execFileSync("ps", ["-o", "rss=,pcpu=", "-p", String(desktop.pid)], { encoding: "utf8" }).trim().split(/\s+/);
-  const memory = execFileSync("footprint", ["-p", String(desktop.pid)], { encoding: "utf8" })
-    .split("\n").find(line => line.includes("Footprint:"))?.match(/Footprint: (.+?) \(/)?.[1];
+  const footprint = child("footprint", ["-p", String(desktop.pid)], { stdio: ["ignore", "pipe", "ignore"] }, []);
+  let report = "";
+  footprint.stdout.on("data", data => { report += data; });
+  await new Promise(resolve => footprint.once("close", resolve));
+  const memory = report.match(/Footprint: (.+?) \(/)?.[1];
   console.log(`Idle app: physical footprint ${memory ?? "unavailable"}, RSS ${(Number(usage[0]) / 1024).toFixed(1)} MiB, sampled CPU ${usage[1]}%; no aria2 child.`);
 } catch (error) {
   console.error(error);
@@ -440,13 +477,14 @@ try {
   console.error("Native states:", records().map(item => ({ name: item.name, state: item.state, message: item.message })));
   console.error("Fixture requests:", calls.slice(-22));
   console.error("Desktop:", appLog.join("").slice(-3000));
-  console.error("Edge:", edgeLog.join("").slice(-3000));
+  console.error(browserName + ":", browserLog.join("").slice(-3000));
   process.exitCode = 1;
 } finally {
   await shutdown(browser);
   await shutdown(desktop);
   const activeLaunch = launchedDesktop ?? (requestedDesktopLaunch && !desktop ? runningDesktop() : null);
   if (activeLaunch && runningDesktop() === activeLaunch) process.kill(activeLaunch, "SIGTERM");
+  if (registered) rmSync(hostManifest);
   fixture.closeAllConnections();
   fixture.close();
   proxy.closeAllConnections();

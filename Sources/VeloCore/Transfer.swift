@@ -16,6 +16,8 @@ public struct Transfer: Codable, Identifiable, Equatable, Sendable {
     public var url: URL?
     public var name: String
     public let fromBrowser: Bool
+    public var sourceBrowser: BrowserID?
+    public var browserTestID: UUID?
     public let expectedBytes: Int64?
     public let createdAt: Date
     public var updatedAt: Date

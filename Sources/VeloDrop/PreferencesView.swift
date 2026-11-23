@@ -50,15 +50,24 @@ struct PreferencesView: View {
     @State private var error = false
     @State private var checkingUpdate = false
     @State private var updateMessage: String?
-    @State private var section: PreferencesSection = .general
+    @State private var section: PreferencesSection
     @State private var choosingFolder = false
-    @State private var checkedAt: Date?
+    @State private var connections: [BrowserID: BrowserConnection] = [:]
+    @State private var verified: [BrowserID: BrowserConnection] = [:]
+    @State private var setupBrowser: SupportedBrowser?
+    @State private var setupError: String?
+    @State private var disconnectConfirmation: SupportedBrowser?
     @State private var browserSetupVersion = 0
     @AppStorage("deleteFilesByDefault") private var deleteFiles = true
     @AppStorage("playCompletionSound") private var playSound = false
 
-    private var extensionFolder: URL {
-        BundleLayout.browserExtension(in: Bundle.main.bundleURL)
+    init(model: DownloadModel, showBrowsers: Bool = false) {
+        self.model = model
+        _section = State(initialValue: showBrowsers ? .browsers : .general)
+    }
+
+    private var signedFirefoxExtension: URL? {
+        Bundle.main.url(forResource: "VeloDrop-Firefox", withExtension: "xpi")
     }
 
     private var currentVersion: String {
@@ -91,17 +100,27 @@ struct PreferencesView: View {
         }
         .frame(width: 680, height: 660)
         .background(Color(nsColor: .windowBackgroundColor))
-        .onAppear(perform: refreshConnection)
+        .onAppear(perform: refreshConnections)
         .onReceive(NotificationCenter.default.publisher(for: .velodropCheckForUpdates)) { _ in
             section = .general
             checkForUpdates()
         }
-        .onReceive(NotificationCenter.default.publisher(for: .velodropOpenEdgeSettings)) { _ in
+        .onReceive(NotificationCenter.default.publisher(for: .velodropOpenBrowserSettings)) { _ in
             section = .browsers
-            refreshConnection()
+            refreshConnections()
         }
         .onReceive(Timer.publish(every: 5, on: .main, in: .common).autoconnect()) { _ in
-            if section == .browsers { refreshConnection() }
+            if section == .browsers { refreshConnections() }
+        }
+        .onChange(of: model.testingBrowser) { refreshConnections() }
+        .sheet(item: $setupBrowser) { browser in browserSetup(browser) }
+        .confirmationDialog("Disconnect Browser?", isPresented: Binding(
+            get: { disconnectConfirmation != nil },
+            set: { if !$0 { disconnectConfirmation = nil } }
+        ), presenting: disconnectConfirmation) { browser in
+            Button("Disconnect", role: .destructive) { disconnect(browser) }
+        } message: { browser in
+            Text("VeloDrop will stop receiving downloads from \(browser.name).")
         }
         .fileImporter(isPresented: $choosingFolder, allowedContentTypes: [.folder]) { result in
             do { model.defaultFolder = try result.get().path }
@@ -333,7 +352,7 @@ struct PreferencesView: View {
 
     private var browsers: some View {
         VStack(spacing: 12) {
-            connectionCard
+            browserConnectors
 
             settingsCard("Browser Takeover", symbol: "hand.raised") {
                 VStack(spacing: 0) {
@@ -412,129 +431,179 @@ struct PreferencesView: View {
                 }
             }
 
-            settingsCard("Browser Connectors", symbol: "link") {
-                VStack(alignment: .leading, spacing: 11) {
-                    Text("The VeloDrop extension only bridges downloads. It has no settings of its own; everything is managed here.")
-                        .font(.system(size: 10))
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-
-                    VStack(spacing: 0) {
-                        ForEach(Array(SupportedBrowser.supported.enumerated()), id: \.element.id) { index, browser in
-                            if index > 0 {
-                                Divider().overlay(VD.hairline).padding(.leading, 30)
-                            }
-                            browserRow(browser)
-                        }
-                    }
-                    .id(browserSetupVersion)
-
-                    step(1, "Choose Set Up Browsers. VeloDrop registers the connector for every installed browser, copies the extension folder path, and opens the extensions page.")
-                    step(2, "Chrome, Edge, Brave, Vivaldi: turn on Developer mode, choose Load unpacked, and select the copied folder.")
-                    step(3, "Firefox: click Load in Firefox, then choose Load Temporary Add-on in about:debugging and select the copied manifest.json.")
-                    step(4, "That is all. The toolbar icon only shows the bridge status, and the connection appears above.")
-                    Text("After updating VeloDrop, reload the extension once in your browser to use the new bridge UI.")
-                        .font(.system(size: 9.5))
-                        .foregroundStyle(.tertiary)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Text("Firefox removes temporary add-ons when it restarts. Sign the extension to keep it installed permanently.")
-                        .font(.system(size: 9.5))
-                        .foregroundStyle(.tertiary)
-                        .fixedSize(horizontal: false, vertical: true)
-                    HStack(spacing: 8) {
-                        Button("Set Up Browsers…", action: install)
-                            .buttonStyle(VDPrimaryButtonStyle(compact: true))
-                        Button("Copy Extension Path", action: copyPath)
-                            .buttonStyle(VDSecondaryButtonStyle(compact: true))
-                        Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([extensionFolder]) }
-                            .buttonStyle(VDSecondaryButtonStyle(compact: true))
-                    }
-                    .padding(.top, 1)
-                    Text("Works with Chrome, Edge, Brave, Vivaldi, and Firefox.")
-                        .font(.system(size: 9.5))
-                        .foregroundStyle(.tertiary)
-                }
-            }
-
-            HStack(spacing: 8) {
-                Button("Disconnect", action: disconnect)
-                    .buttonStyle(VDDangerButtonStyle(compact: true))
-                Spacer()
-            }
         }
     }
 
-    private var connectionCard: some View {
-        HStack(spacing: 12) {
-            ZStack {
-                Circle()
-                    .fill((checkedAt == nil ? VD.orange : VD.green).opacity(0.12))
-                    .frame(width: 42, height: 42)
-                Image(systemName: "puzzlepiece.extension.fill")
-                    .font(.system(size: 17))
-                    .foregroundStyle(checkedAt == nil ? VD.orange : VD.green)
-            }
-            VStack(alignment: .leading, spacing: 2) {
-                Text(checkedAt == nil ? "Not Connected" : "Connected")
-                    .font(.system(size: 12.5, weight: .semibold))
-                if let checkedAt {
-                    Text("Last connected \(Format.dateTime(checkedAt))")
-                        .font(.system(size: 9.5))
-                        .foregroundStyle(.secondary)
-                } else {
-                    Text("No connection check received yet.")
-                        .font(.system(size: 9.5))
-                        .foregroundStyle(.secondary)
+    private var browserConnectors: some View {
+        settingsCard("Browser Extensions", symbol: "puzzlepiece.extension") {
+            VStack(spacing: 0) {
+                let browsers = SupportedBrowser.supported.sorted { $0.isInstalled && !$1.isInstalled }
+                ForEach(browsers) { browser in
+                    if browser.id != browsers.first?.id {
+                        Divider().overlay(VD.hairline).padding(.leading, 42)
+                    }
+                    browserRow(browser)
                 }
+                .id(browserSetupVersion)
             }
-            Spacer()
-            Button("Refresh Connection", action: refreshConnection)
-                .buttonStyle(VDSecondaryButtonStyle(compact: true))
         }
-        .vdCard(padding: 12)
     }
 
     private func browserRow(_ browser: SupportedBrowser) -> some View {
-        HStack(spacing: 10) {
-            Group {
-                if let icon = browser.icon {
-                    Image(nsImage: icon)
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                } else {
-                    Image(systemName: "globe")
-                        .font(.system(size: 14))
-                        .foregroundStyle(.secondary)
+        let connection = connections[browser.id]
+        let ready = connection?.extensionVersion == currentVersion
+        let passed = verified[browser.id].flatMap { $0.extensionVersion == currentVersion ? $0.checkedAt : nil }
+        let registered = browser.isRegistered
+        let runningTest = model.testingBrowser == browser.id
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 10) {
+                Group {
+                    if let icon = browser.icon {
+                        Image(nsImage: icon).resizable().aspectRatio(contentMode: .fit)
+                    } else {
+                        Image(systemName: "globe").foregroundStyle(.secondary)
+                    }
+                }
+                .frame(width: 25, height: 25)
+                .opacity(browser.isInstalled ? 1 : 0.42)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(browser.name)
+                        .font(.system(size: 12, weight: .semibold))
+                    if !browser.isInstalled {
+                        Text("Not installed").foregroundStyle(.secondary)
+                    } else if runningTest {
+                        Label("Testing download…", systemImage: "arrow.down.circle").foregroundStyle(VD.accent)
+                    } else if registered, ready, let passed {
+                        Label("Test passed \(Format.when(passed))", systemImage: "checkmark.circle.fill")
+                            .foregroundStyle(VD.green)
+                    } else if registered, ready, let connection {
+                        Label("Last connected \(Format.when(connection.checkedAt))", systemImage: "link")
+                            .foregroundStyle(VD.green)
+                    } else if registered, let version = connection?.extensionVersion {
+                        Text("Extension \(version) needs updating").foregroundStyle(VD.orange)
+                    } else {
+                        Text(registered ? "Waiting for extension" : "Connector not set up").foregroundStyle(.secondary)
+                    }
+                }
+                .font(.system(size: 10.5))
+                Spacer(minLength: 8)
+                if browser.isInstalled {
+                    if registered, ready {
+                        if runningTest {
+                            ProgressView().controlSize(.small)
+                        } else {
+                            Button("Test Download") { model.testBrowser(browser) }
+                                .buttonStyle(VDSecondaryButtonStyle(compact: true))
+                                .disabled(model.testingBrowser != nil)
+                        }
+                    } else {
+                        Button(registered ? "Extension Setup…" : "Connect…") { setupBrowser = browser }
+                            .buttonStyle(VDPrimaryButtonStyle(compact: true))
+                    }
+                    if registered {
+                        Menu {
+                            if ready { Button("Extension Setup…") { setupBrowser = browser } }
+                            Button("Disconnect…") { disconnectConfirmation = browser }
+                                .disabled(runningTest)
+                        } label: {
+                            Image(systemName: "ellipsis.circle")
+                        }
+                        .menuStyle(.borderlessButton)
+                        .menuIndicator(.hidden)
+                        .fixedSize()
+                        .accessibilityLabel("More actions for \(browser.name)")
+                    }
                 }
             }
-            .frame(width: 20, height: 20)
-            .opacity(browser.isInstalled ? 1 : 0.35)
-
-            VStack(alignment: .leading, spacing: 1) {
-                Text(browser.name)
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(browser.isInstalled ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
-                Text(browserStatus(browser))
-                    .font(.system(size: 9.5))
-                    .foregroundStyle(browser.isInstalled
-                                     ? AnyShapeStyle(browser.isRegistered ? VD.green : VD.orange)
-                                     : AnyShapeStyle(.tertiary))
-            }
-            Spacer()
-            if browser.isInstalled {
-                Button(browser.actionTitle) {
-                    if browser.family == .firefox { copySelectionPath(browser) }
-                    browser.openInstallPage()
-                }
-                .buttonStyle(VDSecondaryButtonStyle(compact: true))
+            if let error = model.browserTestErrors[browser.id], registered {
+                Label(error, systemImage: "exclamationmark.circle")
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(VD.orange)
+                    .padding(.leading, 35)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
-        .padding(.vertical, 5)
+        .padding(.vertical, 9)
     }
 
-    private func browserStatus(_ browser: SupportedBrowser) -> LocalizedStringKey {
-        if !browser.isInstalled { return "Not installed" }
-        return browser.isRegistered ? "Connector ready" : "Connector not set up"
+    private func browserSetup(_ browser: SupportedBrowser) -> some View {
+        let signed = browser.family == .firefox ? signedFirefoxExtension : nil
+        return VStack(alignment: .leading, spacing: 16) {
+            HStack(spacing: 12) {
+                if let icon = browser.icon {
+                    Image(nsImage: icon).resizable().aspectRatio(contentMode: .fit)
+                        .frame(width: 36, height: 36)
+                }
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Connect \(browser.name)").font(.title3.weight(.semibold))
+                    Text(setupSubtitle(browser, signed: signed != nil))
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            if signed == nil {
+                Text(browser.family == .firefox
+                    ? "Choose Load Temporary Add-on and paste the manifest path with ⇧⌘G. The extension is removed when Firefox quits."
+                    : "Turn on Developer mode, choose Load unpacked, then press ⇧⌘G to paste the extension folder. If VeloDrop is already listed, choose Reload instead.")
+                    .font(.callout)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .vdCard(padding: 12)
+            }
+            if let setupError {
+                Label(setupError, systemImage: "exclamationmark.circle")
+                    .foregroundStyle(VD.orange).font(.caption)
+            }
+            Divider()
+            HStack {
+                Button("Close") { setupBrowser = nil }.keyboardShortcut(.cancelAction)
+                Spacer()
+                Button(signed == nil ? "Copy Path and Open Browser" : "Open Signed Extension") {
+                    install(browser, signed: signed)
+                }
+                .buttonStyle(VDPrimaryButtonStyle()).keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(22)
+        .frame(width: 470)
+        .onAppear { setupError = nil }
+    }
+
+    private func setupSubtitle(_ browser: SupportedBrowser, signed: Bool) -> LocalizedStringKey {
+        if signed { return "Open the signed extension in Firefox and confirm installation." }
+        if browser.family == .firefox { return "Load the VeloDrop manifest from This Firefox." }
+        return "Load or refresh VeloDrop in your browser’s extension manager."
+    }
+
+    private func install(_ browser: SupportedBrowser, signed: URL?) {
+        do {
+            guard try BrowserConnector.register(browser, bundle: Bundle.main.bundleURL) else { return }
+            browserSetupVersion += 1
+            setupBrowser = nil
+            if let signed {
+                browser.open(signed)
+            } else {
+                let clipboard = NSPasteboard.general
+                clipboard.clearContents()
+                clipboard.setString(browser.extensionSelectionPath(in: Bundle.main.bundleURL), forType: .string)
+                browser.openInstallPage()
+            }
+        } catch {
+            setupError = error.localizedDescription
+        }
+    }
+
+    private func disconnect(_ browser: SupportedBrowser) {
+        do {
+            try BrowserConnector.remove(browser)
+            model.workspace.removeBrowserConnection(browser.id)
+            browserSetupVersion += 1
+            refreshConnections()
+        } catch {
+            message = error.localizedDescription
+            self.error = true
+        }
     }
 
     private var excludedHostCount: Int {
@@ -569,22 +638,13 @@ struct PreferencesView: View {
         .padding(.vertical, 4)
     }
 
-    private func step(_ number: Int, _ text: LocalizedStringKey) -> some View {
-        HStack(alignment: .top, spacing: 8) {
-            Text("\(number)")
-                .font(.system(size: 9, weight: .bold))
-                .foregroundStyle(.white)
-                .frame(width: 16, height: 16)
-                .background(VD.accent.opacity(0.85), in: Circle())
-            Text(text)
-                .font(.system(size: 10))
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-    }
-
-    private func refreshConnection() {
-        checkedAt = model.lastBrowserConnection
+    private func refreshConnections() {
+        connections = Dictionary(uniqueKeysWithValues: BrowserID.allCases.compactMap { id in
+            model.workspace.browserConnection(id).map { (id, $0) }
+        })
+        verified = Dictionary(uniqueKeysWithValues: BrowserID.allCases.compactMap { id in
+            model.workspace.browserTestResult(id).map { (id, $0) }
+        })
     }
 
     private func checkForUpdates() {
@@ -630,54 +690,4 @@ struct PreferencesView: View {
         }
     }
 
-    private func install() {
-        do {
-            let count = try BrowserConnector.registerAll(bundle: Bundle.main.bundleURL)
-            guard count > 0 else {
-                message = String(localized: "No supported browser was found. Install Chrome, Edge, Brave, Vivaldi, or Firefox first.")
-                error = true
-                return
-            }
-            browserSetupVersion += 1
-            copyPath()
-            SupportedBrowser.firstInstalled?.openInstallPage()
-            message = String(localized: "Browser connector installed. Load the extension in each browser you want to use.")
-            error = false
-        } catch {
-            message = error.localizedDescription
-            self.error = true
-        }
-    }
-
-    private func copySelectionPath(_ browser: SupportedBrowser) {
-        let path = browser.extensionSelectionPath(in: Bundle.main.bundleURL)
-        let clipboard = NSPasteboard.general
-        clipboard.clearContents()
-        let copied = clipboard.setString(path, forType: .string)
-        if browser.family == .firefox {
-            message = copied
-                ? String(localized: "Firefox manifest path copied. In about:debugging, choose Load Temporary Add-on and select manifest.json.")
-                : String(localized: "Couldn’t copy the extension path. You can open the folder in Finder.")
-            error = !copied
-        } else {
-            copyPath()
-        }
-    }
-
-    private func copyPath() {
-        let clipboard = NSPasteboard.general
-        clipboard.clearContents()
-        let copied = clipboard.setString(extensionFolder.path(percentEncoded: false), forType: .string)
-        message = copied
-            ? String(localized: "Extension path copied.")
-            : String(localized: "Couldn’t copy the extension path. You can open the folder in Finder.")
-        error = !copied
-    }
-
-    private func disconnect() {
-        BrowserConnector.removeAll()
-        browserSetupVersion += 1
-        message = String(localized: "The connector was removed. You can remove the extension in each browser.")
-        error = false
-    }
 }

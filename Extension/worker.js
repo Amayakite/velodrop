@@ -49,11 +49,11 @@ async function rememberAppVersion(version) {
 }
 
 async function pingApp() {
-  const reply = await native({ action: "ping" });
+  const reply = await native({ action: "ping", extensionVersion: api.runtime.getManifest().version });
   if (!reply?.ok) throw new Error("VeloDrop is not ready");
   await rememberAppVersion(reply.version);
   if (reply.rules) {
-    cachedRules = { ...defaults, ...reply.rules };
+    cachedRules = { ...defaults, ...reply.rules, testURL: reply.testURL };
     rulesAt = Date.now();
   }
   return reply;
@@ -81,19 +81,32 @@ function safeURL(value) {
   }
 }
 
-function eligible(item, settings) {
-  if (!settings.enabled || item.paused || item.state !== "in_progress" ||
+function isBrowserTest(item, rules) {
+  return Boolean(rules.testURL && item.url === rules.testURL &&
+    (!item.finalUrl || item.finalUrl === rules.testURL));
+}
+
+function eligible(item, rules) {
+  if (item.paused || item.state !== "in_progress" ||
       (item.danger !== undefined && item.danger !== "safe") ||
       item.incognito || !item.filename) return null;
   if (item.mime === "text/html" || item.mime === "application/xhtml+xml") return null;
   const url = safeURL(item.finalUrl || item.url);
   if (!url || !safeURL(item.url)) return null;
-  const size = item.totalBytes > 0 ? item.totalBytes : (item.fileSize > 0 ? item.fileSize : 0);
-  if (settings.minimumMiB > 0 && (size <= 0 || size < settings.minimumMiB * 1024 * 1024)) return null;
-  const blocked = settings.excludedHosts.split(/[\s,;]+/).map(normalizedHost).filter(Boolean);
+  if (isBrowserTest(item, rules)) return url;
+  if (!rules.enabled) return null;
+  const size = item.totalBytes > 0 ? item.totalBytes : item.fileSize;
+  if (rules.minimumMiB > 0 && !(size >= rules.minimumMiB * 1024 * 1024)) return null;
+  const blocked = rules.excludedHosts.split(/[\s,;]+/).map(normalizedHost).filter(Boolean);
   const hosts = [url.hostname, normalizedHost(item.url), normalizedHost(item.referrer ?? "")];
   if (blocked.some(domain => hosts.some(host => host === domain || host.endsWith("." + domain)))) return null;
   return url;
+}
+
+function heldByExtension(item) {
+  // Gecko exposes a paused download as interrupted until it is resumed.
+  return item?.paused === true &&
+    (item.state === "in_progress" || (isGecko && item.state === "interrupted"));
 }
 
 function exchange(port, message, timeout = 850) {
@@ -121,6 +134,23 @@ function replayable(item, context) {
     (context.method === "GET" || /\.[a-z0-9]{1,8}$/i.test(source.pathname));
 }
 
+async function canHoldGeckoDownload(item, url) {
+  const info = responseInfo(url.href) ?? responseInfo(item.url);
+  if (!info?.acceptsRanges || !info.hasValidator || (info.contentEncoding && info.contentEncoding !== "identity")) {
+    return false;
+  }
+  // Gecko cancels instead of pausing when its partial file is still empty.
+  // Byte progress does not trigger downloads.onChanged in Firefox.
+  const deadline = Date.now() + 1600;
+  while (Date.now() < deadline) {
+    const [current] = await api.downloads.search({ id: item.id });
+    if (!current || current.state !== "in_progress" || current.paused) return false;
+    if (current.bytesReceived > 0) return true;
+    await new Promise(resolve => setTimeout(resolve, 80));
+  }
+  return false;
+}
+
 function payload(item, url, context, handoff, action) {
   return {
     action,
@@ -137,19 +167,22 @@ function payload(item, url, context, handoff, action) {
   };
 }
 
-async function takeOver(item) {
+async function takeOver(item, rules) {
   const browserId = item.id;
   const key = prefix + browserId;
   let handoff;
   let port;
   let canceled = false;
   try {
-    const currentSettings = await currentRules(true);
+    const currentSettings = rules ?? await currentRules(true);
     const url = eligible(item, currentSettings);
     if (!url) return;
-    const context = await requestContext(item, url, currentSettings.reuseSessionHeaders);
+    const context = isBrowserTest(item, currentSettings)
+      ? { headers: {}, proxy: { mode: "direct" }, method: "GET" }
+      : await requestContext(item, url, currentSettings.reuseSessionHeaders);
     if (!context) return;
     const fast = Boolean(replayable(item, context));
+    if (isGecko && !fast && !(await canHoldGeckoDownload(item, url))) return;
     handoff = {
       id: crypto.randomUUID(),
       browserId,
@@ -179,7 +212,7 @@ async function takeOver(item) {
       await ensureAlarm();
       await api.downloads.pause(browserId);
       const [paused] = await api.downloads.search({ id: browserId });
-      if (!paused?.paused || paused.state !== "in_progress" || paused.danger !== "safe") {
+      if (!heldByExtension(paused) || (paused.danger !== undefined && paused.danger !== "safe")) {
         await release(handoff, "resume");
         return;
       }
@@ -236,7 +269,7 @@ async function release(handoff, outcome) {
     await native({ action: "abandon", id: handoff.id }).catch(() => {});
   }
   let [item] = await api.downloads.search({ id: handoff.browserId });
-  if (item?.state === "in_progress" && item.paused) {
+  if (heldByExtension(item)) {
     if (outcome === "resume") await api.downloads.resume(handoff.browserId);
     if (outcome === "cancel") {
       await api.downloads.cancel(handoff.browserId);
@@ -286,12 +319,12 @@ async function sweep() {
           await settleFast(job, item, state, returned);
           continue;
         }
-        if (!item || item.state !== "in_progress" || !item.paused) {
+        if (!heldByExtension(item)) {
           const committed = state?.state === "completed" || state?.state === "canceled";
           await release(job, committed ? "cancel" : "abandon");
           continue;
         }
-        if (item.danger !== "safe") {
+        if (item.danger !== undefined && item.danger !== "safe") {
           await release(job, "resume");
           continue;
         }
@@ -313,25 +346,36 @@ async function sweep() {
   }
 }
 
-function waitForDownload(id) {
+function waitForDownload(id, rules) {
   return new Promise(resolve => {
     let finished = false;
+    let checking = false;
     const finish = item => {
       if (finished) return;
       finished = true;
+      clearInterval(retry);
+      clearTimeout(deadline);
       api.downloads.onChanged.removeListener(changed);
       api.downloads.onErased.removeListener(erased);
       resolve(item);
     };
     const check = async () => {
-      const [item] = await api.downloads.search({ id }).catch(() => []);
+      if (finished || checking) return;
+      checking = true;
+      const [download] = await api.downloads.search({ id }).catch(() => []);
+      checking = false;
       if (finished) return;
-      if (!item) return finish(null);
-      const size = item.totalBytes > 0 ? item.totalBytes : (item.fileSize > 0 ? item.fileSize : 0);
-      if (item.state !== "in_progress" || (size > 0 && item.filename)) finish(item);
+      if (!download || download.state !== "in_progress") return finish(null);
+      const item = enrichDownload(download);
+      const size = Math.max(item.totalBytes ?? 0, item.fileSize ?? 0);
+      if (item.filename && (size > 0 || rules.minimumMiB === 0 || isBrowserTest(item, rules))) finish(item);
     };
     const changed = delta => { if (delta.id === id) void check(); };
     const erased = erasedId => { if (erasedId === id) finish(null); };
+    // Header capture and onCreated are separate events. A header can arrive
+    // without triggering downloads.onChanged, so allow a short retry window.
+    const retry = setInterval(() => void check(), 90);
+    const deadline = setTimeout(() => finish(null), 1600);
     api.downloads.onChanged.addListener(changed);
     api.downloads.onErased.addListener(erased);
     void check();
@@ -376,8 +420,11 @@ if (api.downloads.onDeterminingFilename) {
   api.downloads.onCreated.addListener(item => {
     if (item.byExtensionId === api.runtime.id || starting.has(item.id)) return;
     starting.add(item.id);
-    void waitForDownload(item.id)
-      .then(ready => ready && ready.state === "in_progress" ? takeOver(enrichDownload(ready)) : false)
+    void currentRules(true).then(async rules => {
+      if (!rules.enabled && !isBrowserTest(item, rules)) return;
+      const ready = await waitForDownload(item.id, rules);
+      if (ready) await takeOver(ready, rules);
+    })
       .catch(() => false)
       .finally(() => starting.delete(item.id));
   });
@@ -404,7 +451,7 @@ api.runtime.onInstalled.addListener(details => {
 });
 api.runtime.onMessage.addListener((message, _, reply) => {
   if (message.action === "open") {
-    native({ action: "open" }).then(() => reply({ ok: true }), () => reply({ ok: false }));
+    native({ action: "open" }).then(reply, () => reply({ ok: false }));
     return true;
   }
   if (message.action !== "ping") return false;

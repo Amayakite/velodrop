@@ -13,6 +13,9 @@ struct DownloadConfirmationView: View {
     @State private var connections: Int
     @State private var folderError: String?
     @State private var filename: String
+    @State private var renaming = false
+    @FocusState private var filenameFocused: Bool
+    @State private var showingOptions = false
     @State private var later = false
     @State private var filePolicy: ExistingFilePolicy
 
@@ -31,7 +34,19 @@ struct DownloadConfirmationView: View {
             Divider().overlay(VD.hairline)
             VStack(alignment: .leading, spacing: 12) {
                 destinationCard
-                optionsCard
+                HStack {
+                    Toggle("Download later", isOn: $later)
+                        .toggleStyle(.checkbox)
+                        .font(.system(size: 11.5))
+                    Spacer()
+                    Button {
+                        showingOptions.toggle()
+                    } label: {
+                        Label("Download Options", systemImage: showingOptions ? "chevron.up" : "slider.horizontal.3")
+                    }
+                    .buttonStyle(VDSecondaryButtonStyle(compact: true))
+                }
+                if showingOptions { optionsCard }
                 if filePolicy == .replace {
                     Label("An existing file with the same name will be replaced.", systemImage: "exclamationmark.triangle")
                         .font(.system(size: 10.5))
@@ -44,6 +59,11 @@ struct DownloadConfirmationView: View {
                         .foregroundStyle(VD.red)
                         .padding(.horizontal, 2)
                 }
+                if let notice = model.notice {
+                    Label(notice, systemImage: "exclamationmark.circle")
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(VD.red)
+                }
                 if waitingCount > 1 {
                     Label("Other downloads are waiting for confirmation.", systemImage: "clock")
                         .font(.system(size: 10.5))
@@ -55,7 +75,10 @@ struct DownloadConfirmationView: View {
             Divider().overlay(VD.hairline)
             footer
         }
-        .frame(width: 520)
+        .frame(width: 540)
+        .onChange(of: renaming) { _, value in
+            if value { filenameFocused = true }
+        }
         .background(Color(nsColor: .windowBackgroundColor))
         .fileImporter(isPresented: $choosingFolder, allowedContentTypes: [.folder]) { result in
             do {
@@ -78,18 +101,26 @@ struct DownloadConfirmationView: View {
             VStack(alignment: .leading, spacing: 7) {
                 HStack(spacing: 6) {
                     SectionEyebrow(text: "Confirm Download")
-                    StatusBadge(state: .awaitingConfirmation, text: "From Browser", compact: true)
+                    StatusBadge(state: .awaitingConfirmation,
+                                text: transfer.sourceBrowser.map { LocalizedStringKey($0.name) } ?? "From Browser",
+                                compact: true)
                 }
-                TextField("Filename", text: $filename)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 15, weight: .semibold))
-                    .padding(.horizontal, 9)
-                    .frame(height: 30)
-                    .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 7, style: .continuous)
-                            .strokeBorder(VD.hairline, lineWidth: 0.8)
-                    )
+                HStack(spacing: 6) {
+                    if renaming {
+                        TextField("Filename", text: $filename)
+                            .textFieldStyle(.roundedBorder)
+                            .focused($filenameFocused)
+                            .font(.system(size: 15, weight: .semibold))
+                    } else {
+                        Text(filename)
+                            .font(.system(size: 16, weight: .semibold))
+                            .lineLimit(2)
+                            .truncationMode(.middle)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .help(filename)
+                        VDIconButton(symbol: "pencil", help: "Rename File") { renaming = true }
+                    }
+                }
                 HStack(spacing: 5) {
                     Image(systemName: "globe")
                         .font(.system(size: 9))
@@ -160,18 +191,6 @@ struct DownloadConfirmationView: View {
                 .menuStyle(.borderlessButton)
                 .frame(width: 170)
             }
-            Divider().overlay(VD.hairline).padding(.leading, 30)
-            HStack(spacing: 8) {
-                Image(systemName: "clock")
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 16)
-                Toggle("Download later", isOn: $later)
-                    .toggleStyle(.checkbox)
-                    .font(.system(size: 11.5))
-                Spacer()
-            }
-            .padding(.vertical, 9)
         }
         .padding(.horizontal, 12)
         .background(VD.card, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
@@ -202,7 +221,12 @@ struct DownloadConfirmationView: View {
                 .buttonStyle(VDSecondaryButtonStyle())
                 .keyboardShortcut(.cancelAction)
             Spacer()
-            Button("Use Browser") { model.useEdge(transfer) }
+            Button {
+                model.useBrowser(transfer)
+            } label: {
+                if let browser = transfer.sourceBrowser { Text("Use \(browser.name) to Download") }
+                else { Text("Use Browser") }
+            }
                 .buttonStyle(VDSecondaryButtonStyle())
             Button("Use VeloDrop") {
                 model.confirm(transfer, into: directory, connections: connections,

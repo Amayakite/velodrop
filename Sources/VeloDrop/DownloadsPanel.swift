@@ -5,9 +5,8 @@ import VeloCore
 
 struct DownloadsPanel: View {
     @Bindable var model: DownloadModel
-    var inWindow = true
     let openPreferences: () -> Void
-    let openDownloads: () -> Void
+    let openBrowserPreferences: () -> Void
 
     @State private var search = ""
     @State private var selected = Set<UUID>()
@@ -18,6 +17,7 @@ struct DownloadsPanel: View {
     @State private var fileKind = "All Types"
     @State private var sidebar = true
     @State private var inspector = false
+    @State private var showCompactInspector = false
     @State private var sort: SortField = .date
     @State private var ascending = false
     @State private var samples: [Double] = Array(repeating: 0, count: 44)
@@ -27,7 +27,7 @@ struct DownloadsPanel: View {
     private let ticker = Timer.publish(every: 0.8, on: .main, in: .common).autoconnect()
 
     private var visible: [Transfer] {
-        let filtered = model.transfers.filter {
+        let filtered = model.userTransfers.filter {
             scope.includes($0) && matchesType($0) && (search.isEmpty ||
                 $0.displayName.localizedStandardContains(search) ||
                 $0.sourceURL?.host?.localizedStandardContains(search) == true)
@@ -43,13 +43,12 @@ struct DownloadsPanel: View {
         return ascending ? sorted : sorted.reversed()
     }
 
-    private var selection: [Transfer] { model.transfers.filter { selected.contains($0.id) } }
-    private var totalVisibleSize: Int64 { visible.reduce(0) { $0 + max($1.total, $1.received) } }
+    private var selection: [Transfer] { model.userTransfers.filter { selected.contains($0.id) } }
 
     private var monthStats: (bytes: Int64, count: Int) {
         let calendar = Calendar.current
         let now = Date()
-        return model.transfers.reduce(into: (Int64(0), 0)) { result, item in
+        return model.userTransfers.reduce(into: (Int64(0), 0)) { result, item in
             guard item.state == .completed,
                   calendar.isDate(item.finishedAt ?? item.updatedAt, equalTo: now, toGranularity: .month) else { return }
             result.0 += max(item.received, item.total)
@@ -58,19 +57,21 @@ struct DownloadsPanel: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            topBar
-            Divider().overlay(VD.hairline)
-            GeometryReader { geometry in
-                let showsSidebar = sidebar && geometry.size.width >= 980 && (!inspector || geometry.size.width >= 1240)
-                let showsInspector = inspector && geometry.size.width >= 940
+        GeometryReader { geometry in
+            let canDockInspector = geometry.size.width >= 940
+            let showsInspector = inspector && canDockInspector
+            let canDockSidebar = geometry.size.width >= (showsInspector ? 1240 : 980)
+            let showRates = visible.contains { $0.state == .downloading }
+            VStack(spacing: 0) {
+                topBar(canDockSidebar: canDockSidebar)
+                Divider().overlay(VD.hairline)
                 HStack(spacing: 0) {
-                    if showsSidebar {
+                    if sidebar && canDockSidebar {
                         DownloadSidebar(model: model, scope: $scope, monthStats: monthStats)
                             .frame(width: 196)
                         Divider().overlay(VD.hairline)
                     }
-                    content(showsSidebar: showsSidebar, showsInspector: showsInspector)
+                    content(showsSidebar: sidebar && canDockSidebar, canDockInspector: canDockInspector, showRates: showRates)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                     if showsInspector {
                         Divider().overlay(VD.hairline)
@@ -78,16 +79,29 @@ struct DownloadsPanel: View {
                             .frame(width: 294)
                     }
                 }
+                Divider().overlay(VD.hairline)
+                statusBar
             }
-            Divider().overlay(VD.hairline)
-            statusBar
         }
         .background(Color(nsColor: .textBackgroundColor))
         .sheet(isPresented: $showLink) { AddDownloadsView(model: model) }
+        .sheet(isPresented: $showCompactInspector) {
+            VStack(spacing: 0) {
+                inspectorPane
+                Divider()
+                Button("Done") { showCompactInspector = false }
+                    .buttonStyle(VDSecondaryButtonStyle())
+                    .keyboardShortcut(.cancelAction)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+                    .padding(14)
+            }
+            .frame(width: 440, height: 468)
+            .background(Color(nsColor: .windowBackgroundColor))
+        }
         .sheet(item: $deletion) { request in DeleteDownloadsView(ids: request.ids, model: model) }
         .alert("Clear Finished History?", isPresented: $confirmClear) {
             Button("Clear History", role: .destructive) {
-                for transfer in model.transfers where transfer.state.terminal {
+                for transfer in model.userTransfers where transfer.state.terminal {
                     model.removeHistory(transfer)
                 }
             }
@@ -95,7 +109,7 @@ struct DownloadsPanel: View {
         } message: {
             Text("Downloaded files will stay on disk.")
         }
-        .onChange(of: model.transfers.map(\.id)) { _, ids in selected.formIntersection(ids) }
+        .onChange(of: model.userTransfers.map(\.id)) { _, ids in selected.formIntersection(ids) }
         .onChange(of: scope) { selected.removeAll() }
         .onChange(of: search) { selected.removeAll() }
         .onReceive(ticker) { _ in
@@ -111,20 +125,14 @@ struct DownloadsPanel: View {
 
     // MARK: - Top bar
 
-    private var topBar: some View {
+    private func topBar(canDockSidebar: Bool) -> some View {
         HStack(spacing: 12) {
-            VDIconButton(symbol: "sidebar.left", help: "Toggle Sidebar") {
-                if inspector { inspector = false; sidebar = true } else { sidebar.toggle() }
+            if canDockSidebar {
+                VDIconButton(symbol: "sidebar.left", help: "Toggle Sidebar") { sidebar.toggle() }
             }
             BrandMark(size: 30)
-            VStack(alignment: .leading, spacing: 1) {
-                Text("VeloDrop")
-                    .font(.system(size: 14, weight: .semibold))
-                Text(activityLine)
-                    .font(.system(size: 10.5))
-                    .foregroundStyle(.secondary)
-                    .monospacedDigit()
-            }
+            Text("VeloDrop")
+                .font(.system(size: 15, weight: .semibold))
             Spacer(minLength: 8)
             searchField
             Button {
@@ -139,13 +147,6 @@ struct DownloadsPanel: View {
         .padding(.horizontal, 16)
         .frame(height: 56)
         .background(Color(nsColor: .windowBackgroundColor).ignoresSafeArea(edges: .top))
-    }
-
-    private var activityLine: String {
-        if model.activeCount > 0 {
-            return String(localized: "\(model.activeCount) active · \(Format.rate(model.rate))")
-        }
-        return String(localized: "Ready to download")
     }
 
     private var searchField: some View {
@@ -178,28 +179,31 @@ struct DownloadsPanel: View {
 
     // MARK: - Content
 
-    private func content(showsSidebar: Bool, showsInspector: Bool) -> some View {
+    private func content(showsSidebar: Bool, canDockInspector: Bool, showRates: Bool) -> some View {
         VStack(spacing: 0) {
-            contentHeader
-            columnHeader
+            contentHeader(showsSidebar: showsSidebar, canDockInspector: canDockInspector)
             if let notice = model.notice {
                 noticeBanner(notice)
             }
             if visible.isEmpty {
                 emptyState
             } else {
-                downloadList
+                columnHeader(showRates: showRates)
+                downloadList(showRates: showRates)
             }
         }
         .background(Color(nsColor: .textBackgroundColor))
     }
 
-    private var contentHeader: some View {
+    private func contentHeader(showsSidebar: Bool, canDockInspector: Bool) -> some View {
         HStack(alignment: .center, spacing: 10) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(scope.title)
-                    .font(.system(size: 21, weight: .bold))
-                Text("\(visible.count) downloads · \(Format.bytes(totalVisibleSize))")
+                if showsSidebar {
+                    Text(scope.title).font(.system(size: 21, weight: .bold))
+                } else {
+                    scopeMenu
+                }
+                Text("\(visible.count) downloads")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .monospacedDigit()
@@ -235,13 +239,53 @@ struct DownloadsPanel: View {
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
             .fixedSize()
-            VDIconButton(symbol: "sidebar.right", help: "Download Details") {
-                inspector.toggle()
+            if !selected.isEmpty {
+                Button {
+                    deletion = DownloadDeletion(ids: selected)
+                } label: {
+                    Label("Delete Selected…", systemImage: "trash")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(VD.red)
+                        .padding(.horizontal, 9)
+                        .frame(height: 25)
+                        .background(VD.red.opacity(0.09), in: RoundedRectangle(cornerRadius: 7))
+                }
+                .buttonStyle(.plain)
+                .fixedSize()
             }
+            VDIconButton(symbol: canDockInspector ? "sidebar.right" : "info.circle", help: "Download Details") {
+                if canDockInspector {
+                    inspector.toggle()
+                } else {
+                    showCompactInspector = true
+                }
+            }
+            .disabled(visible.isEmpty)
         }
         .padding(.horizontal, 18)
         .padding(.top, 14)
         .padding(.bottom, 8)
+    }
+
+    private var scopeMenu: some View {
+        Menu {
+            ForEach(DownloadScope.allCases) { category in
+                Button { scope = category } label: {
+                    Label(category.title, systemImage: scope == category ? "checkmark" : category.symbol)
+                }
+            }
+        } label: {
+            HStack(spacing: 7) {
+                Text(scope.title).font(.system(size: 21, weight: .bold))
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("Download Categories")
     }
 
     private func pillMenuLabel(_ title: Text, symbol: String) -> some View {
@@ -264,7 +308,7 @@ struct DownloadsPanel: View {
         )
     }
 
-    private var columnHeader: some View {
+    private func columnHeader(showRates: Bool) -> some View {
         HStack(spacing: ColumnMetrics.spacing) {
             sortHeader("Name", field: .name, alignment: .leading)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -272,10 +316,12 @@ struct DownloadsPanel: View {
                 .frame(width: ColumnMetrics.status, alignment: .leading)
             sortHeader("Size", field: .size, alignment: .trailing)
                 .frame(width: ColumnMetrics.size, alignment: .trailing)
-            sortHeader("Speed", field: .speed, alignment: .trailing)
-                .frame(width: ColumnMetrics.speed, alignment: .trailing)
-            Text("Remaining")
-                .frame(width: ColumnMetrics.remaining, alignment: .trailing)
+            if showRates {
+                sortHeader("Speed", field: .speed, alignment: .trailing)
+                    .frame(width: ColumnMetrics.speed, alignment: .trailing)
+                Text("Remaining")
+                    .frame(width: ColumnMetrics.remaining, alignment: .trailing)
+            }
             Color.clear
                 .frame(width: ColumnMetrics.actions)
         }
@@ -303,7 +349,7 @@ struct DownloadsPanel: View {
         .foregroundStyle(sort == field ? .primary : .secondary)
     }
 
-    private var downloadList: some View {
+    private func downloadList(showRates: Bool) -> some View {
         ScrollView {
             LazyVStack(spacing: 3) {
                 ForEach(visible) { item in
@@ -312,8 +358,9 @@ struct DownloadsPanel: View {
                         model: model,
                         selected: selected.contains(item.id),
                         selectedIDs: selected,
+                        showRates: showRates,
                         deleteIDs: { ids in deletion = DownloadDeletion(ids: ids) },
-                        select: { select(item) },
+                        select: { modifiers in select(item, modifiers: modifiers) },
                         open: {
                             if item.state == .awaitingConfirmation { model.askToConfirm(item) }
                             else { model.onProgress?(item.id) }
@@ -325,19 +372,20 @@ struct DownloadsPanel: View {
             .padding(.top, 4)
             .padding(.bottom, 12)
         }
-        .background(
-            Color.clear
-                .contentShape(Rectangle())
-                .onTapGesture { selected.removeAll() }
-        )
         .focusable()
         .focused($listFocused)
         .focusEffectDisabled()
         .onKeyPress(.downArrow) { moveSelection(1); return .handled }
         .onKeyPress(.upArrow) { moveSelection(-1); return .handled }
+        .onKeyPress(.escape) {
+            guard !selected.isEmpty else { return .ignored }
+            selected.removeAll()
+            return .handled
+        }
         .onKeyPress(.return) {
-            if let id = selected.first, let item = model.transfers.first(where: { $0.id == id }) {
-                model.onProgress?(item.id)
+            if selection.count == 1, let item = selection.first {
+                if item.state == .awaitingConfirmation { model.askToConfirm(item) }
+                else { model.onProgress?(item.id) }
             }
             return .handled
         }
@@ -382,7 +430,8 @@ struct DownloadsPanel: View {
     }
 
     private var emptyState: some View {
-        VStack(spacing: 12) {
+        let libraryEmpty = model.userTransfers.isEmpty
+        return VStack(spacing: 12) {
             ZStack {
                 Circle()
                     .fill(VD.accent.opacity(0.07))
@@ -393,16 +442,16 @@ struct DownloadsPanel: View {
                 BrandMark(size: 50)
             }
             .padding(.bottom, 4)
-            Text(search.isEmpty ? "No downloads yet" : "No matching downloads")
+            Text(libraryEmpty ? "No downloads yet" : "No matching downloads")
                 .font(.system(size: 16, weight: .semibold))
-            Text(search.isEmpty
+            Text(libraryEmpty
                  ? "Add a link or download a file from your browser."
-                 : "Try a different search or file type.")
+                 : "Try a different category, search, or file type.")
                 .font(.system(size: 11.5))
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 300)
-            if search.isEmpty {
+            if libraryEmpty {
                 HStack(spacing: 8) {
                     Button {
                         showLink = true
@@ -410,7 +459,7 @@ struct DownloadsPanel: View {
                         Label("New Download", systemImage: "plus")
                     }
                     .buttonStyle(VDPrimaryButtonStyle())
-                    Button("Browser Settings…", action: openPreferences)
+                    Button("Browser Settings…", action: openBrowserPreferences)
                         .buttonStyle(VDSecondaryButtonStyle())
                 }
                 .padding(.top, 4)
@@ -463,27 +512,25 @@ struct DownloadsPanel: View {
                 Text("\(selected.count) selected")
                     .monospacedDigit()
             }
-            Text("\(visible.count) downloads")
-                .monospacedDigit()
             Divider().frame(height: 12)
             VDIconButton(symbol: "folder", help: "Downloads folder", size: 22) {
                 NSWorkspace.shared.open(URL(fileURLWithPath: model.defaultFolder))
             }
             Menu {
-                if model.transfers.contains(where: { $0.state.running }) {
+                if model.userTransfers.contains(where: { $0.state.running }) {
                     Button("Pause All") {
-                        for item in model.transfers where item.state.running { model.pause(item) }
+                        for item in model.userTransfers where item.state.running { model.pause(item) }
                     }
                 }
-                if model.transfers.contains(where: { $0.state == .paused && $0.url != nil }) {
+                if model.userTransfers.contains(where: { $0.state == .paused && $0.url != nil }) {
                     Button("Resume All") {
-                        for item in model.transfers where item.state == .paused { model.resume(item) }
+                        for item in model.userTransfers where item.state == .paused { model.resume(item) }
                     }
                 }
-                if model.transfers.contains(where: { $0.state.running || ($0.state == .paused && $0.url != nil) }) {
+                if model.userTransfers.contains(where: { $0.state.running || ($0.state == .paused && $0.url != nil) }) {
                     Divider()
                 }
-                if model.transfers.contains(where: { $0.state.terminal }) {
+                if model.userTransfers.contains(where: { $0.state.terminal }) {
                     Button("Clear Finished History…") { confirmClear = true }
                     Divider()
                 }
@@ -516,14 +563,13 @@ struct DownloadsPanel: View {
         }
     }
 
-    private func select(_ item: Transfer) {
+    private func select(_ item: Transfer, modifiers: EventModifiers) {
         listFocused = true
-        let flags = NSEvent.modifierFlags
-        if flags.contains(.command) {
+        if modifiers.contains(.command) {
             if selected.contains(item.id) { selected.remove(item.id) }
             else { selected.insert(item.id) }
             anchor = item.id
-        } else if flags.contains(.shift), let anchor,
+        } else if modifiers.contains(.shift), let anchor,
                   let from = visible.firstIndex(where: { $0.id == anchor }),
                   let to = visible.firstIndex(where: { $0.id == item.id }) {
             selected = Set(visible[min(from, to)...max(from, to)].map(\.id))
@@ -575,7 +621,7 @@ private enum ColumnMetrics {
     static let size: CGFloat = 74
     static let speed: CGFloat = 86
     static let remaining: CGFloat = 70
-    static let actions: CGFloat = 62
+    static let actions: CGFloat = 70
 }
 
 private enum SortField: String, CaseIterable, Identifiable {
@@ -662,7 +708,7 @@ private struct DownloadSidebar: View {
             VStack(spacing: 2) {
                 ForEach(DownloadScope.allCases) { category in
                     SidebarRow(category: category,
-                               count: model.transfers.filter(category.includes).count,
+                               count: model.userTransfers.filter(category.includes).count,
                                selected: scope == category) {
                         scope = category
                     }
@@ -743,15 +789,17 @@ private struct DownloadRow: View {
     let model: DownloadModel
     let selected: Bool
     let selectedIDs: Set<UUID>
+    let showRates: Bool
     let deleteIDs: (Set<UUID>) -> Void
-    let select: () -> Void
+    let select: (EventModifiers) -> Void
     let open: () -> Void
     @State private var hovering = false
+    private var showsProgress: Bool { transfer.state == .downloading || transfer.state == .paused }
 
     var body: some View {
         HStack(spacing: ColumnMetrics.spacing) {
             HStack(spacing: 10) {
-                FileIconTile(transfer: transfer, size: 38)
+                FileIconTile(transfer: transfer, size: showsProgress ? 36 : 30)
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 5) {
                         Text(transfer.displayName)
@@ -765,12 +813,16 @@ private struct DownloadRow: View {
                                 .help("High")
                         }
                     }
-                    Text(detail)
-                        .font(.system(size: 10.5))
-                        .foregroundStyle(transfer.state == .failed ? VD.red.opacity(0.9) : .secondary)
-                        .lineLimit(1)
-                        .monospacedDigit()
-                    VDProgressBar(fraction: barFraction, tint: transfer.state.tint, height: 4)
+                    if !detail.isEmpty {
+                        Text(detail)
+                            .font(.system(size: 10.5))
+                            .foregroundStyle(transfer.state == .failed ? VD.red.opacity(0.9) : .secondary)
+                            .lineLimit(1)
+                            .monospacedDigit()
+                    }
+                    if showsProgress {
+                        VDProgressBar(fraction: transfer.fraction, tint: transfer.state.tint, height: 4)
+                    }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -778,21 +830,23 @@ private struct DownloadRow: View {
 
             StatusBadge(state: transfer.state, text: transfer.state.shortStatusKey)
                 .frame(width: ColumnMetrics.status, alignment: .leading)
-            Text(transfer.total > 0 ? Format.bytes(transfer.total) : "—")
+            Text(max(transfer.total, transfer.received) > 0 ? Format.bytes(max(transfer.total, transfer.received)) : "—")
                 .font(.system(size: 11))
                 .monospacedDigit()
                 .foregroundStyle(.secondary)
                 .frame(width: ColumnMetrics.size, alignment: .trailing)
-            Text(transfer.state == .downloading ? Format.rate(transfer.speed) : "—")
-                .font(.system(size: 11, weight: transfer.state == .downloading ? .semibold : .regular))
-                .monospacedDigit()
-                .foregroundStyle(transfer.state == .downloading ? VD.accent : .secondary)
-                .frame(width: ColumnMetrics.speed, alignment: .trailing)
-            Text(transfer.remainingText)
-                .font(.system(size: 10.5))
-                .monospacedDigit()
-                .foregroundStyle(.secondary)
-                .frame(width: ColumnMetrics.remaining, alignment: .trailing)
+            if showRates {
+                Text(transfer.state == .downloading ? Format.rate(transfer.speed) : "")
+                    .font(.system(size: 11, weight: .semibold))
+                    .monospacedDigit()
+                    .foregroundStyle(VD.accent)
+                    .frame(width: ColumnMetrics.speed, alignment: .trailing)
+                Text(transfer.state == .downloading ? transfer.remainingText : "")
+                    .font(.system(size: 10.5))
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+                    .frame(width: ColumnMetrics.remaining, alignment: .trailing)
+            }
             actions
                 .frame(width: ColumnMetrics.actions, alignment: .trailing)
         }
@@ -809,51 +863,41 @@ private struct DownloadRow: View {
         }
         .contentShape(Rectangle())
         .onHover { hovering = $0 }
-        .onTapGesture(count: 2, perform: open)
-        .onTapGesture(perform: select)
+        .gesture(selectionGesture)
         .contextMenu { contextMenu }
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("\(transfer.displayName), \(transfer.statusText), \(detail)")
+        .accessibilityLabel(Text(([transfer.displayName, transfer.statusText, detail]).filter { !$0.isEmpty }.joined(separator: ", ")))
+        .accessibilityAddTraits(selected ? .isSelected : [])
+        .accessibilityAction { select([]) }
+    }
+
+    private var selectionGesture: some Gesture {
+        TapGesture().modifiers(.command).onEnded { select(.command) }
+            .exclusively(before: TapGesture().modifiers(.shift).onEnded { select(.shift) })
+            .exclusively(before: TapGesture(count: 2).onEnded { open() })
+            .exclusively(before: TapGesture().onEnded { select([]) })
     }
 
     private var detail: String {
         switch transfer.state {
         case .awaitingConfirmation:
-            return [String(localized: "From Browser"),
-                    transfer.total > 0 ? Format.bytes(transfer.total) : nil]
-                .compactMap { $0 }.joined(separator: " · ")
+            return transfer.sourceBrowser?.name ?? String(localized: "From Browser")
         case .queued:
-            return [String(localized: "Waiting"),
-                    transfer.total > 0 ? Format.bytes(transfer.total) : nil]
-                .compactMap { $0 }.joined(separator: " · ")
+            return ""
         case .downloading, .paused:
-            let size = transfer.total > 0
-                ? String(localized: "\(Format.bytes(transfer.received)) of \(Format.bytes(transfer.total))")
-                : Format.bytes(transfer.received)
-            let stage = transfer.state == .paused ? String(localized: "Paused") : String(localized: "Downloading")
             let percent = transfer.fraction.map { String(format: "%.0f%%", $0 * 100) }
             let connections = transfer.connections > 0
                 ? String(localized: "\(transfer.connections) connections") : nil
-            return [stage, percent, size, connections].compactMap { $0 }.joined(separator: " · ")
+            return [Format.bytes(transfer.received), percent, connections].compactMap { $0 }.joined(separator: " · ")
         case .completed:
-            let date = transfer.finishedAt ?? transfer.updatedAt
-            return [Format.bytes(transfer.received), transfer.sourceURL?.host, Format.when(date)]
+            return [transfer.sourceURL?.host, Format.when(transfer.finishedAt ?? transfer.updatedAt)]
                 .compactMap { $0 }.joined(separator: " · ")
         case .failed:
             return transfer.message ?? String(localized: "Download failed")
         case .canceled:
-            return String(localized: "Canceled")
+            return ""
         case .handedToBrowser:
-            return String(localized: "Sent back to the browser.")
-        }
-    }
-
-    private var barFraction: Double? {
-        switch transfer.state {
-        case .completed: 1
-        case .awaitingConfirmation, .queued: 0
-        case .canceled, .handedToBrowser: transfer.fraction
-        default: transfer.fraction
+            return transfer.message ?? String(localized: "Sent back to the browser.")
         }
     }
 
@@ -869,6 +913,7 @@ private struct DownloadRow: View {
             case .failed where transfer.url != nil:
                 quickButton("arrow.clockwise", "Retry") { model.resume(transfer) }
             case .completed:
+                quickButton("arrow.up.right.square", "Open File") { model.openFile(transfer) }
                 quickButton("folder", "Show in Finder") { model.reveal(transfer) }
             default:
                 EmptyView()
@@ -908,13 +953,13 @@ private struct DownloadRow: View {
         }
         if transfer.fromBrowser && !transfer.state.terminal {
             Divider()
-            Button("Continue in Browser") { model.useEdge(transfer) }
+            Button("Continue in Browser") { model.useBrowser(transfer) }
         }
         if !transfer.state.terminal {
             Button("Cancel download", role: .destructive) { model.cancel(transfer) }
         }
         Divider()
-        Button("Delete Downloads?", role: .destructive) {
+        Button("Delete Selected…", role: .destructive) {
             deleteIDs(selectedIDs.contains(transfer.id) ? selectedIDs : [transfer.id])
         }
     }
@@ -961,18 +1006,23 @@ struct TransferInspector: View {
                 }
 
                 LazyVGrid(columns: [GridItem(.flexible(), spacing: 7), GridItem(.flexible(), spacing: 7)], spacing: 7) {
-                    StatTile(title: "File Size", value: transfer.total > 0 ? Format.bytes(transfer.total) : "—",
-                             symbol: "externaldrive")
-                    StatTile(title: "Downloaded", value: Format.bytes(transfer.received),
-                             symbol: "arrow.down")
-                    StatTile(title: "Speed", value: transfer.state == .downloading ? Format.rate(transfer.speed) : "—",
-                             symbol: "speedometer", tint: VD.accent)
-                    StatTile(title: "Remaining", value: transfer.remainingText,
-                             symbol: "timer")
-                    StatTile(title: "Connections", value: "\(transfer.connections)" + (transfer.connectionLimit.map { " / \($0)" } ?? ""),
-                             symbol: "point.3.connected.trianglepath.dotted")
+                    let size = max(transfer.received, transfer.total)
+                    if size > 0 {
+                        StatTile(title: "File Size", value: Format.bytes(size), symbol: "externaldrive")
+                    }
                     StatTile(title: "Added", value: Format.when(transfer.createdAt),
                              symbol: "calendar")
+                    if let finished = transfer.finishedAt, transfer.state == .completed {
+                        StatTile(title: "Finished", value: Format.when(finished), symbol: "checkmark.circle")
+                    }
+                    if let browser = transfer.sourceBrowser {
+                        StatTile(title: "Browser", value: browser.name, symbol: "globe")
+                    }
+                    if transfer.state == .downloading || transfer.state == .paused {
+                        StatTile(title: "Connections",
+                                 value: "\(transfer.connections) / \(transfer.connectionLimit ?? model.maxConnections)",
+                                 symbol: "point.3.connected.trianglepath.dotted")
+                    }
                 }
 
                 VStack(alignment: .leading, spacing: 6) {
@@ -1028,9 +1078,6 @@ struct TransferInspector: View {
                             .buttonStyle(VDPrimaryButtonStyle(compact: true))
                     } else if transfer.state == .awaitingConfirmation {
                         Button("Confirm…") { model.askToConfirm(transfer) }
-                            .buttonStyle(VDPrimaryButtonStyle(compact: true))
-                    } else if transfer.state == .completed {
-                        Button("Open File") { model.openFile(transfer) }
                             .buttonStyle(VDPrimaryButtonStyle(compact: true))
                     }
                 }
@@ -1166,11 +1213,13 @@ private struct DeleteDownloadsView: View {
     @State private var remember = false
     @State private var deleting = false
 
-    private var items: [Transfer] { model.transfers.filter { ids.contains($0.id) } }
-    private var totalBytes: Int64 { items.reduce(0) { $0 + max($1.received, $1.total) } }
+    private var items: [Transfer] { model.userTransfers.filter { ids.contains($0.id) } }
+    private var fileSizes: [Int64] { items.compactMap(model.deletableFileSize) }
     private var titleKey: LocalizedStringKey { items.count == 1 ? "Delete Download?" : "Delete Downloads?" }
 
     var body: some View {
+        let fileSizes = fileSizes
+        let active = items.filter { !$0.state.terminal }.count
         VStack(spacing: 0) {
             VStack(spacing: 10) {
                 ZStack {
@@ -1183,28 +1232,37 @@ private struct DeleteDownloadsView: View {
                 }
                 Text(titleKey)
                     .font(.system(size: 17, weight: .semibold))
-                Text("\(items.count) downloads · \(Format.bytes(totalBytes))")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                    .monospacedDigit()
+                VStack(spacing: 3) {
+                    Text("\(items.count) history records")
+                    if active > 0 {
+                        Text("\(active) unfinished downloads will be stopped.")
+                    }
+                }
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
             }
             .padding(.top, 22)
             .padding(.bottom, 18)
 
             VStack(spacing: 8) {
-                choice(title: "Delete Files and History",
-                       detail: "Files will be moved to Trash. Active downloads will be stopped.",
-                       symbol: "trash", selected: files) { files = true }
+                if !fileSizes.isEmpty {
+                    choice(title: "Delete Files and History",
+                           detail: "\(fileSizes.count) files · \(Format.bytes(fileSizes.reduce(0, +))) will be moved to Trash.",
+                           symbol: "trash", selected: files) { files = true }
+                }
                 choice(title: "Delete History Only",
                        detail: "Downloaded files will stay on disk.",
-                       symbol: "clock.arrow.circlepath", selected: !files) { files = false }
+                       symbol: "clock.arrow.circlepath", selected: !files || fileSizes.isEmpty) { files = false }
             }
             .padding(.horizontal, 20)
 
-            Toggle("Remember this choice", isOn: $remember)
-                .font(.system(size: 11))
-                .padding(.horizontal, 20)
-                .padding(.top, 15)
+            if !fileSizes.isEmpty {
+                Toggle("Remember this choice", isOn: $remember)
+                    .font(.system(size: 11))
+                    .padding(.horizontal, 20)
+                    .padding(.top, 15)
+            }
 
             Divider().overlay(VD.hairline).padding(.top, 16)
             HStack(spacing: 8) {
@@ -1213,12 +1271,12 @@ private struct DeleteDownloadsView: View {
                     .buttonStyle(VDSecondaryButtonStyle())
                     .keyboardShortcut(.cancelAction)
                 Button("Delete", role: .destructive) {
-                    if remember { defaultFiles = files }
+                    if remember && !fileSizes.isEmpty { defaultFiles = files }
                     deleting = true
-                    Task { await model.delete(ids, files: files); dismiss() }
+                    Task { await model.delete(ids, files: files && !fileSizes.isEmpty); dismiss() }
                 }
                 .buttonStyle(VDDestructiveButtonStyle())
-                .disabled(deleting)
+                .disabled(deleting || items.isEmpty)
             }
             .padding(16)
         }

@@ -4,11 +4,10 @@ import UniformTypeIdentifiers
 
 struct WelcomeView: View {
     @Bindable var model: DownloadModel
-    let openPreferences: () -> Void
+    let openBrowserPreferences: () -> Void
     let done: () -> Void
     @State private var step = 0
     @State private var choosingFolder = false
-    @State private var connection: Date?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -120,44 +119,21 @@ struct WelcomeView: View {
             VStack(alignment: .leading, spacing: 10) {
                 Label("Connect your browser", systemImage: "puzzlepiece.extension")
                     .font(.system(size: 14, weight: .semibold))
-                Text("Open Settings, choose Browsers, and follow the extension setup steps.")
+                Text("Choose your browser and follow the extension setup steps.")
                     .font(.system(size: 10.5))
                     .foregroundStyle(.secondary)
-                HStack(spacing: 8) {
-                    Button("Settings…", action: openPreferences)
-                        .buttonStyle(VDPrimaryButtonStyle(compact: true))
-                    Button("Check Connection") { connection = model.lastBrowserConnection }
-                        .buttonStyle(VDSecondaryButtonStyle(compact: true))
-                    Spacer()
-                }
-                if let connection {
-                    Label("Last connected \(Format.time(connection))",
-                          systemImage: "checkmark.circle.fill")
-                        .font(.system(size: 10))
-                        .foregroundStyle(VD.green)
-                } else {
-                    Text("The bridge checks in automatically after your browser loads the extension.")
-                        .font(.system(size: 9.5))
-                        .foregroundStyle(.tertiary)
-                }
+                Button("Browser Settings…", action: openBrowserPreferences)
+                    .buttonStyle(VDPrimaryButtonStyle(compact: true))
             }
         default:
             VStack(alignment: .leading, spacing: 10) {
                 Label("Try your first download", systemImage: "arrow.down.circle")
                     .font(.system(size: 14, weight: .semibold))
-                Text("Download a file in your browser. VeloDrop will ask whether to download here, use the browser, or cancel.")
+                Text("Use Test Download next to your browser in Settings to check that VeloDrop can receive and complete a download.")
                     .font(.system(size: 10.5))
                     .foregroundStyle(.secondary)
-                Button("Test Download in Browser") {
-                    guard let browser = SupportedBrowser.firstInstalled?.appURL,
-                          let url = URL(string: "https://speed.cloudflare.com/__down?bytes=3145728") else { return }
-                    NSWorkspace.shared.open([url], withApplicationAt: browser,
-                                            configuration: NSWorkspace.OpenConfiguration())
-                }
-                .buttonStyle(VDPrimaryButtonStyle(compact: true))
-                Text("The test downloads a 3 MiB file from Cloudflare. Your browser rules still apply.")
-                    .font(.system(size: 9.5))
-                    .foregroundStyle(.tertiary)
+                Button("Browser Settings…", action: openBrowserPreferences)
+                    .buttonStyle(VDPrimaryButtonStyle(compact: true))
             }
         }
     }

@@ -35,7 +35,7 @@ final class DownloadModel {
         didSet { UserDefaults.standard.set(showWindowOnCapture, forKey: "showWindowOnCapture") }
     }
 
-    // Browser takeover rules live in the app. The Edge extension only asks for
+    // Browser takeover rules live in the app. The extension asks for
     // them through VeloBridge, so users have one place to configure downloads.
     var browserTakeoverEnabled: Bool {
         didSet { persistBrowserRules() }
@@ -68,6 +68,11 @@ final class DownloadModel {
 
     @ObservationIgnored var onBrowserIntake: (() -> Void)?
     @ObservationIgnored private var shouldShowIntake = false
+    private(set) var testingBrowser: BrowserID?
+    private(set) var browserTestErrors: [BrowserID: String] = [:]
+    @ObservationIgnored private var browserTestServer: BrowserTestServer?
+    @ObservationIgnored private var browserTestTimeout: Task<Void, Never>?
+    @ObservationIgnored private var browserTestID: UUID?
     @ObservationIgnored private var browserHeaders: [UUID: BrowserHeaders] = [:]
 
     let workspace: Workspace
@@ -121,6 +126,14 @@ final class DownloadModel {
             workspace.expireOldOutcomes()
             persistBrowserRules()
             transfers = workspace.all()
+            for var transfer in transfers where transfer.browserTestID != nil {
+                if !transfer.state.terminal {
+                    transfer.state = .canceled
+                    transfer.url = nil
+                    save(transfer)
+                }
+                removeHistory(transfer)
+            }
             for var transfer in transfers where transfer.state.running || transfer.state == .paused {
                 if let output = workspace.recoveredOutput(transfer) {
                     finish(transfer, at: output)
@@ -151,14 +164,60 @@ final class DownloadModel {
         }
     }
 
-    var lastBrowserConnection: Date? {
-        guard let value = try? String(contentsOf: workspace.root.appendingPathComponent("browser-connection"), encoding: .utf8),
-              let timestamp = Double(value) else { return nil }
-        return Date(timeIntervalSince1970: timestamp)
+    func testBrowser(_ browser: SupportedBrowser) {
+        guard lockDescriptor >= 0, testingBrowser == nil else { return }
+        let id = UUID()
+        browserTestErrors[browser.id] = nil
+        do {
+            let server = try BrowserTestServer(id: id)
+            browserTestServer = server
+            browserTestID = id
+            testingBrowser = browser.id
+            server.start { [weak self] result in
+                DispatchQueue.main.async {
+                    guard let self, self.browserTestID == id else { return }
+                    do {
+                        let url = try result.get()
+                        let test = BrowserTest(id: id, url: url, expiresAt: Date().addingTimeInterval(30))
+                        try self.workspace.setBrowserTest(browser.id, test: test)
+                        browser.open(url, activates: false)
+                    } catch {
+                        self.finishBrowserTest(error: error.localizedDescription)
+                    }
+                }
+            }
+            browserTestTimeout = Task { [weak self] in
+                try? await Task.sleep(for: .seconds(30))
+                guard !Task.isCancelled, let self, self.browserTestID == id else { return }
+                self.finishBrowserTest(error: String(localized: "No test download was received. Check the extension in this browser and try again."))
+            }
+        } catch {
+            browserTestErrors[browser.id] = error.localizedDescription
+        }
     }
 
-    var activeCount: Int { transfers.filter { $0.state.running }.count }
-    var rate: Int64 { transfers.reduce(0) { $0 + $1.speed } }
+    private func finishBrowserTest(error: String? = nil) {
+        guard let browser = testingBrowser else { return }
+        let testID = browserTestID
+        browserTestErrors[browser] = error
+        testingBrowser = nil
+        browserTestID = nil
+        browserTestServer?.stop()
+        browserTestServer = nil
+        browserTestTimeout?.cancel()
+        browserTestTimeout = nil
+        try? workspace.setBrowserTest(browser, test: nil)
+        if let testID, error != nil {
+            for transfer in transfers where transfer.browserTestID == testID {
+                cancel(transfer)
+                if let canceled = workspace.read(transfer.id) { removeHistory(canceled) }
+            }
+        }
+    }
+
+    var userTransfers: [Transfer] { transfers.filter { $0.browserTestID == nil } }
+    var activeCount: Int { userTransfers.filter { $0.state.running }.count }
+    var rate: Int64 { userTransfers.reduce(0) { $0 + $1.speed } }
 
     func add(_ text: String) throws {
         guard lockDescriptor >= 0, let url = URL(string: text.trimmingCharacters(in: .whitespacesAndNewlines)),
@@ -185,21 +244,23 @@ final class DownloadModel {
     func pause(_ transfer: Transfer) { change(transfer.id, to: .paused) }
     func resume(_ transfer: Transfer) { change(transfer.id, to: .queued) }
     func cancel(_ transfer: Transfer) {
-        change(transfer.id, to: .canceled)
+        guard change(transfer.id, to: .canceled) else { return }
         if confirmation?.id == transfer.id {
             confirmation = nil
             confirmNextIfNeeded()
         }
     }
 
-    func useEdge(_ transfer: Transfer) {
-        change(transfer.id, to: .handedToBrowser, message: String(localized: "Sent back to the browser."))
+    func useBrowser(_ transfer: Transfer) {
+        let message = transfer.sourceBrowser.map { String(localized: "Sent back to \($0.name).") }
+            ?? String(localized: "Sent back to the browser.")
+        guard change(transfer.id, to: .handedToBrowser, message: message) else { return }
         if confirmation?.id == transfer.id {
             confirmation = nil
             confirmNextIfNeeded()
         }
-        if confirmation == nil {
-            NSRunningApplication.runningApplications(withBundleIdentifier: "com.microsoft.edgemac")
+        if confirmation == nil, let browser = transfer.sourceBrowser {
+            NSRunningApplication.runningApplications(withBundleIdentifier: browser.bundleIdentifier)
                 .first?.activate()
         }
     }
@@ -232,8 +293,8 @@ final class DownloadModel {
         let recent = [directory.path] + recentFolders.filter { $0 != directory.path }
         UserDefaults.standard.set(Array(recent.prefix(5)), forKey: "recentFolders")
         item.state = later ? .paused : .queued
-        save(item)
-        confirmation = nil
+        guard save(item) else { return }
+        if confirmation?.id == item.id { confirmation = nil }
         if !later { onProgress?(item.id) }
         confirmNextIfNeeded()
         startLoop()
@@ -266,9 +327,17 @@ final class DownloadModel {
             if !item.state.terminal { cancel(item) }
             await engine.remove(id)
             guard let current = transfers.first(where: { $0.id == id }) else { continue }
-            if files && current.finalPath != nil { trash(current) }
+            if files && deletableFileSize(current) != nil { trash(current) }
             else { removeHistory(current) }
         }
+    }
+
+    func deletableFileSize(_ transfer: Transfer) -> Int64? {
+        guard transfer.state == .completed, let path = transfer.finalPath else { return nil }
+        let url = URL(fileURLWithPath: path)
+        guard workspace.ownsPublishedFile(url, id: transfer.id),
+              let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize else { return nil }
+        return Int64(size)
     }
 
     func reveal(_ transfer: Transfer) {
@@ -298,7 +367,7 @@ final class DownloadModel {
         }
     }
 
-    func trash(_ transfer: Transfer) {
+    private func trash(_ transfer: Transfer) {
         guard transfer.state == .completed, let path = transfer.finalPath else { return }
         let url = URL(fileURLWithPath: path)
         if !FileManager.default.fileExists(atPath: path) {
@@ -320,15 +389,19 @@ final class DownloadModel {
     func shutdown() {
         shuttingDown = true
         loop?.cancel()
+        browserTestServer?.stop()
+        browserTestTimeout?.cancel()
+        if let testingBrowser { try? workspace.setBrowserTest(testingBrowser, test: nil) }
         engine.stop()
     }
 
-    private func change(_ id: UUID, to state: TransferState, message: String? = nil) {
-        guard var item = transfers.first(where: { $0.id == id }) else { return }
-        if state == .queued, item.url == nil { return }
-        if state == .paused, !item.state.running { return }
-        if state == .canceled, item.state.terminal { return }
-        if state == .failed || state == .handedToBrowser, item.state.terminal { return }
+    @discardableResult
+    private func change(_ id: UUID, to state: TransferState, message: String? = nil) -> Bool {
+        guard var item = transfers.first(where: { $0.id == id }) else { return false }
+        if state == .queued, item.url == nil { return false }
+        if state == .paused, !item.state.running { return false }
+        if state == .canceled, item.state.terminal { return false }
+        if state == .failed || state == .handedToBrowser, item.state.terminal { return false }
         item.state = state
         item.message = message
         item.speed = 0
@@ -336,32 +409,42 @@ final class DownloadModel {
         item.finishedAt = state.terminal ? Date() : nil
         if state.terminal { browserHeaders.removeValue(forKey: id) }
         if state == .canceled || state == .handedToBrowser || (state == .failed && item.fromBrowser) { item.url = nil }
-        save(item)
+        guard save(item) else { return false }
         startLoop()
+        return true
     }
 
-    private func save(_ transfer: Transfer, refreshUI: Bool = true) {
+    @discardableResult
+    private func save(_ transfer: Transfer, refreshUI: Bool = true) -> Bool {
         var updated = transfer
         updated.updatedAt = Date()
         do {
             try workspace.update(updated)
-            guard refreshUI else { return }
+            guard refreshUI else { return true }
             if let index = transfers.firstIndex(where: { $0.id == updated.id }) {
                 transfers[index] = updated
             } else {
                 transfers.insert(updated, at: 0)
             }
+            return true
         } catch {
             notice = String(localized: "Couldn’t save the download state. \(error.localizedDescription)")
+            return false
         }
     }
 
     private func drainInbox() {
         for (path, var transfer, headers) in workspace.incoming() {
             if workspace.browserStatus(transfer.id) == nil && !workspace.wasAbandoned(transfer.id) {
+                let isTest = transfer.browserTestID != nil
+                if isTest && transfer.browserTestID != browserTestID {
+                    changeOrRejectTest(transfer)
+                    try? FileManager.default.removeItem(at: path)
+                    continue
+                }
                 transfer.destinationPath = defaultFolder
                 transfer.existingFilePolicy = existingFilePolicy
-                if confirmBrowserDownloads && transfer.fromBrowser {
+                if !isTest && confirmBrowserDownloads && transfer.fromBrowser {
                     transfer.state = .awaitingConfirmation
                 }
                 save(transfer)
@@ -370,7 +453,7 @@ final class DownloadModel {
                     if transfer.state == .awaitingConfirmation && confirmation == nil {
                         confirmation = transfer
                     }
-                    if transfer.fromBrowser && (showWindowOnCapture || transfer.state == .awaitingConfirmation) {
+                    if !isTest && transfer.fromBrowser && (showWindowOnCapture || transfer.state == .awaitingConfirmation) {
                         shouldShowIntake = true
                     }
                 }
@@ -379,6 +462,13 @@ final class DownloadModel {
         }
         showPendingIntake()
         startLoop()
+    }
+
+    private func changeOrRejectTest(_ transfer: Transfer) {
+        var canceled = transfer
+        canceled.state = .canceled
+        canceled.url = nil
+        if save(canceled) { removeHistory(canceled) }
     }
 
     private func attach(_ transfer: Transfer) async throws {
@@ -512,6 +602,35 @@ final class DownloadModel {
         }
     }
 
+    private func completeBrowserTest(_ item: Transfer) {
+        let payload = workspace.stage(item.id).appendingPathComponent("payload")
+        let size = (try? payload.resourceValues(forKeys: [.fileSizeKey]))?.fileSize
+        guard item.browserTestID == browserTestID else {
+            cancel(item)
+            if let canceled = workspace.read(item.id) { removeHistory(canceled) }
+            return
+        }
+        guard let browser = item.sourceBrowser, size == BrowserTest.bytes else {
+            change(item.id, to: .failed, message: String(localized: "The test file did not match the expected size."))
+            finishBrowserTest(error: String(localized: "The test file did not match the expected size."))
+            return
+        }
+        do {
+            var completed = item
+            completed.state = .completed
+            completed.url = nil
+            completed.speed = 0
+            completed.finishedAt = Date()
+            guard save(completed) else { throw TransferError.invalidResponse }
+            try workspace.noteBrowserTestPassed(browser,
+                extensionVersion: workspace.browserConnection(browser)?.extensionVersion)
+            removeHistory(completed)
+            finishBrowserTest()
+        } catch {
+            finishBrowserTest(error: error.localizedDescription)
+        }
+    }
+
     private func update(_ id: UUID, with status: EngineStatus?) async {
         guard let status, var item = transfers.first(where: { $0.id == id }),
               !item.state.terminal else { return }
@@ -524,6 +643,8 @@ final class DownloadModel {
             do {
                 if item.fromBrowser && workspace.wasAbandoned(id) {
                     change(id, to: .canceled)
+                } else if item.browserTestID != nil {
+                    completeBrowserTest(item)
                 } else {
                     finish(item, at: try workspace.publish(item))
                 }
@@ -535,6 +656,9 @@ final class DownloadModel {
             await engine.forget(id)
         case "error", "removed":
             change(id, to: .failed, message: status.explanation)
+            if let testID = item.browserTestID, testID == browserTestID {
+                finishBrowserTest(error: status.explanation)
+            }
             await engine.forget(id)
         case "waiting":
             guard item.state != .paused else { return }

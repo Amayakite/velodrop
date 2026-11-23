@@ -200,5 +200,5 @@ enum UpdateInstaller {
 
 extension Notification.Name {
     static let velodropCheckForUpdates = Notification.Name("com.amayakite.velodrop.checkForUpdates")
-    static let velodropOpenEdgeSettings = Notification.Name("com.amayakite.velodrop.openEdgeSettings")
+    static let velodropOpenBrowserSettings = Notification.Name("com.amayakite.velodrop.openBrowserSettings")
 }

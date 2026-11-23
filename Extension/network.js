@@ -70,6 +70,12 @@ export function observeResponses() {
         info.contentType = header.value.split(";")[0].trim().toLowerCase();
       } else if (name === "content-disposition") {
         info.filename = filenameFromDisposition(header.value) ?? info.filename;
+      } else if (name === "accept-ranges") {
+        info.acceptsRanges = header.value.trim().toLowerCase() === "bytes";
+      } else if (name === "etag" || name === "last-modified") {
+        info.hasValidator ||= Boolean(header.value?.trim());
+      } else if (name === "content-encoding") {
+        info.contentEncoding = header.value.trim().toLowerCase();
       }
     }
     if (!info.contentLength && !info.contentType && !info.filename) return;
@@ -141,7 +147,8 @@ function proxyEndpoint(value) {
   if (!/^[a-z]+:\/\//i.test(server)) server = "http://" + server;
   let url;
   try { url = new URL(server); } catch { return null; }
-  if (url.protocol !== "http:" || !url.hostname) return null;
+  if (url.protocol !== "http:" || !url.hostname || url.username || url.password ||
+      url.pathname !== "/" || url.search || url.hash) return null;
   const host = url.hostname.includes(":") && !url.hostname.startsWith("[")
     ? "[" + url.hostname + "]" : url.hostname;
   return "http://" + host + ":" + (url.port || "80");
@@ -160,9 +167,11 @@ function firefoxProxy(url, value) {
   const matches = bypass.map(rule => matchesBypass(url, rule));
   if (matches.includes(true)) return { mode: "direct" };
   if (matches.includes(null)) return null;
-  const server = proxyEndpoint(url.protocol === "https:" ? (value.sslProxy ?? "") : (value.httpProxy ?? ""));
-  if (!server) return { mode: "direct" };
-  return { mode: "fixed", endpoint: server };
+  const address = (url.protocol === "https:" && !value.httpProxyAll ? value.ssl : value.http)?.trim();
+  // A manual SOCKS route or invalid endpoint must stay in the browser.
+  if (!address) return value.socks?.trim() ? null : { mode: "direct" };
+  const server = proxyEndpoint(address);
+  return server ? { mode: "fixed", endpoint: server } : null;
 }
 
 async function browserProxy(url) {

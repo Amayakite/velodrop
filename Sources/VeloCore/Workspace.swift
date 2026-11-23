@@ -25,6 +25,7 @@ public struct Workspace: Sendable {
     public var staging: URL { root.appendingPathComponent("Staging", isDirectory: true) }
     private var reservations: URL { root.appendingPathComponent("Reservations", isDirectory: true) }
     private var outcomes: URL { root.appendingPathComponent("Outcomes", isDirectory: true) }
+    private var browsers: URL { root.appendingPathComponent("Browsers", isDirectory: true) }
     public var abandons: URL { root.appendingPathComponent("Abandoned", isDirectory: true) }
 
     public init(root: URL, destination: URL) {
@@ -43,10 +44,57 @@ public struct Workspace: Sendable {
     }
 
     public func prepare() throws {
-        for directory in [root, inbox, records, staging, abandons, outcomes, reservations] {
+        for directory in [root, inbox, records, staging, abandons, outcomes, reservations, browsers] {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true,
                                                     attributes: [.posixPermissions: 0o700])
         }
+    }
+
+    public func browserConnection(_ browser: BrowserID) -> BrowserConnection? {
+        readBrowserValue(BrowserConnection.self, at: browserFile(browser, suffix: "connection"))
+    }
+
+    public func noteBrowserConnection(_ browser: BrowserID, connection: BrowserConnection) throws {
+        try JSONEncoder().encode(connection).write(to: browserFile(browser, suffix: "connection"), options: .atomic)
+    }
+
+    public func browserTest(_ browser: BrowserID) -> BrowserTest? {
+        guard let test = readBrowserValue(BrowserTest.self, at: browserFile(browser, suffix: "pending-test")),
+              test.expiresAt > Date() else { return nil }
+        return test
+    }
+
+    public func setBrowserTest(_ browser: BrowserID, test: BrowserTest?) throws {
+        let file = browserFile(browser, suffix: "pending-test")
+        if let test {
+            try JSONEncoder().encode(test).write(to: file, options: .atomic)
+        } else if FileManager.default.fileExists(atPath: file.path) {
+            try FileManager.default.removeItem(at: file)
+        }
+    }
+
+    public func browserTestResult(_ browser: BrowserID) -> BrowserConnection? {
+        readBrowserValue(BrowserConnection.self, at: browserFile(browser, suffix: "test-passed"))
+    }
+
+    public func noteBrowserTestPassed(_ browser: BrowserID, extensionVersion: String?) throws {
+        let result = BrowserConnection(extensionVersion: extensionVersion)
+        try JSONEncoder().encode(result).write(to: browserFile(browser, suffix: "test-passed"), options: .atomic)
+    }
+
+    public func removeBrowserConnection(_ browser: BrowserID) {
+        for suffix in ["connection", "pending-test", "test-passed"] {
+            try? FileManager.default.removeItem(at: browserFile(browser, suffix: suffix))
+        }
+    }
+
+    private func browserFile(_ browser: BrowserID, suffix: String) -> URL {
+        browsers.appendingPathComponent("\(browser.rawValue)-\(suffix).json")
+    }
+
+    private func readBrowserValue<Value: Decodable>(_ type: Value.Type, at file: URL) -> Value? {
+        guard let data = try? Data(contentsOf: file) else { return nil }
+        return try? JSONDecoder().decode(type, from: data)
     }
 
     public func submit(_ transfer: Transfer, headers: BrowserHeaders? = nil, reserve: Bool = false) throws {
